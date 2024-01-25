@@ -114,3 +114,50 @@ command_i2c_modify_bits(uint32_t *args)
 }
 DECL_COMMAND(command_i2c_modify_bits,
              "i2c_modify_bits oid=%c reg=%*s clear_set_bits=%*s");
+
+struct i2c_shutdown_entry {
+    struct i2c_shutdown_entry *next;
+    uint8_t oid;
+    uint8_t data_len;
+    uint8_t data[0];
+};
+
+struct i2c_shutdown_entry *i2c_shutdown_list;
+void i2c_shutdown_init(void)
+{
+    i2c_shutdown_list = NULL;
+};
+DECL_INIT(i2c_shutdown_init);
+
+void
+command_i2c_set_shutdown(uint32_t * args)
+{
+    uint8_t oid = args[0];
+    uint8_t data_len = args[1];
+    uint8_t *data = command_decode_ptr(args[2]);
+    struct i2c_shutdown_entry *entry = alloc_chunk(sizeof(*entry) + data_len);
+    entry->next = i2c_shutdown_list;
+    entry->oid = oid;
+    entry->data_len = data_len;
+    memcpy(&entry->data, data, data_len);
+    i2c_shutdown_list = entry;
+}
+DECL_COMMAND(command_i2c_set_shutdown, "i2c_set_shutdown oid=%c data=%*s");
+
+void i2c_shutdown(void)
+{
+    while(i2c_shutdown_list)
+    {
+        uint8_t oid = i2c_shutdown_list->oid;
+        struct i2cdev_s *i2c = oid_lookup(oid, command_config_i2c);
+        uint8_t data_len = i2c_shutdown_list->data_len;
+        uint8_t *data = i2c_shutdown_list->data;
+        uint_fast8_t flags = i2c->flags;
+        if (CONFIG_WANT_SOFTWARE_I2C && flags & IF_SOFTWARE)
+            i2c_software_write(i2c->i2c_software, data_len, data);
+        else
+            i2c_write(i2c->i2c_config, data_len, data);
+        i2c_shutdown_list = i2c_shutdown_list->next;
+    }
+}
+DECL_SHUTDOWN(i2c_shutdown);

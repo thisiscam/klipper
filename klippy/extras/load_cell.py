@@ -1,40 +1,74 @@
 # Load Cell Implementation
 #
-# Copyright (C) 2022 Gareth Farrington <gareth@waves.ky>
+# Copyright (C) 2024 Gareth Farrington <gareth@waves.ky>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import logging
-import collections
-
-from . import hx71x, multi_hx71x, multiplex_adc
+import collections, logging
+from . import hx71x
+from .bulk_sensor import BatchWebhooksClient
 
 class SaturationException(Exception):
     pass
 
-# An API Dump Helper for broadcasting events to clients
-class WebhooksApiDumpRepeater:
-    def __init__(self, printer, endpoint, key, value, header):
-        self.clients = {}
-        self.header = header
-        wh = printer.lookup_object('webhooks')
-        wh.register_mux_endpoint(endpoint, key, value,
-                                 self._add_webhooks_client)
-    def _add_webhooks_client(self, web_request):
-        self.add_client(web_request)
-        if self.header:
-            web_request.send(self.header)
-    def add_client(self, web_request):
-        cconn = web_request.get_client_connection()
-        template = web_request.get_dict('response_template', {})
-        self.clients[cconn] = template
+# Helper for event driven webhooks (i.e. non polling based data source)
+class WebhooksHelper(object):
+    def __init__(self, printer):
+        self.printer = printer
+        self.client_cbs = []
+        self.webhooks_start_resp = {}
+    # send data to clients
     def send(self, msg):
-        for cconn, template in list(self.clients.items()):
-            if cconn.is_closed():
-                del self.clients[cconn]
-                continue
-            tmp = dict(template)
-            tmp['params'] = msg
-            cconn.send(tmp)
+        for client_cb in list(self.client_cbs):
+            res = client_cb(msg)
+            if not res:
+                # This client no longer needs updates - unregister it
+                self.client_cbs.remove(client_cb)
+    # Client registration
+    def add_client(self, client_cb):
+        self.client_cbs.append(client_cb)
+    # Webhooks registration
+    def _add_api_client(self, web_request):
+        whbatch = BatchWebhooksClient(web_request)
+        self.add_client(whbatch.handle_batch)
+        web_request.send(self.webhooks_start_resp)
+    def add_mux_endpoint(self, path, key, value, webhooks_start_resp):
+        self.webhooks_start_resp = webhooks_start_resp
+        wh = self.printer.lookup_object('webhooks')
+        wh.register_mux_endpoint(path, key, value, self._add_api_client)
+
+# Adapter for WebhooksHelper that transforms the response using a function
+# Anything that implements the add_client contact can be a mgs source
+# outputs to its own clients
+class WebhooksTransformer(WebhooksHelper):
+    def __init__(self, printer, msg_source, transform_fn):
+        super(WebhooksTransformer, self).__init__(printer)
+        self.msg_source = msg_source
+        self.transform_fn = transform_fn
+        self.is_started = False
+    def _start(self):
+        if self.is_started:
+            return
+        self.is_started = True
+        self.msg_source.add_client(self._transform_batch)
+    def _stop(self):
+        self.is_started = False
+        del self.client_cbs[:]
+    def _transform_batch(self, msg):
+        try:
+            msg_transformed = self.transform_fn(msg)
+        except self.printer.command_error as e:
+            logging.exception("BatchBulkTransformer transform_batch error")
+            self._stop()
+            return self.is_started
+        if not msg_transformed:
+            return self.is_started
+        self.send(msg_transformed)
+        if len(self.client_cbs) == 0:
+            self._stop()
+        return self.is_started
+    def add_client(self, client_cb):
+        self.client_cbs.append(client_cb)
+        self._start()
 
 class LoadCellCommandHelper:
     def __init__(self, config, load_cell):
@@ -44,10 +78,16 @@ class LoadCellCommandHelper:
             raise config.error("LoadCell requires the numpy module")
         self.printer = config.get_printer()
         self.load_cell = load_cell
-        self.name = config.get_name().split()[-1]
+        name_parts = config.get_name().split()
+        self.name = name_parts[-1]
         self.register_commands(self.name)
-        if self.name == "load_cell":
-            self.register_commands(None)
+        if len(name_parts) == 1:
+            # TODO: when this is a [load_cell_probe], what should happen here?
+            # TODO: What if there are multiple probes?
+            # TODO: Duplicate names: [load_cell foo] [load_cell_probe foo] ??
+            if (self.name == "load_cell"
+                    or not config.has_section("load_cell")):
+                self.register_commands(None)
     def register_commands(self, name):
         # Register commands
         gcode = self.printer.lookup_object('gcode')
@@ -91,7 +131,7 @@ class LoadCellCommandHelper:
             "Collecting load cell data for 10 seconds...")
         sps = self.load_cell.sensor.get_samples_per_second()
         collector = self.load_cell.get_collector()
-        samples = collector.collect_samples(sps * 10)
+        samples = collector.collect_min(sps * 10)
         counts = np.asarray(samples)[:, 2].astype(int)
         min, max = self.load_cell.saturation_range()
         good_count = 0
@@ -103,6 +143,9 @@ class LoadCellCommandHelper:
                 good_count += 1
         unique_counts = np.unique(counts)
         gcmd.respond_info("Samples Collected: %i" % (len(samples)))
+        if len(samples) > 2:
+            sps = float(len(samples)) / (samples[-1][0] - samples[0][0])
+            gcmd.respond_info("Measured samples per second: %.1f" % (sps))
         gcmd.respond_info(
             "Good samples: %i, Saturated samples: %i, Unique values: %i"
                           % (good_count, saturation_count, len(unique_counts)))
@@ -131,8 +174,8 @@ class LoadCellGuidedCalibrationHelper:
         register_command("ABORT", self.cmd_ABORT, desc=self.cmd_ABORT_help)
         register_command("ACCEPT", self.cmd_ACCEPT, desc=self.cmd_ACCEPT_help)
         register_command("TARE", self.cmd_TARE, desc=self.cmd_TARE_help)
-        register_command("CALIBRATE", self.cmd_CALIBRATE
-                                                , desc=self.cmd_CALIBRATE_help)
+        register_command("CALIBRATE", self.cmd_CALIBRATE,
+                                                desc=self.cmd_CALIBRATE_help)
     def _avg_counts(self):
         try:
             return self.load_cell.avg_counts()
@@ -157,8 +200,7 @@ class LoadCellGuidedCalibrationHelper:
         if self._counts_per_gram is None or self._tare_counts is None:
             self.gcode.respond_info("Calibration process is incomplete, "
                                      "aborting")
-        self.load_cell.set_calibration(self._counts_per_gram
-                                       , self._tare_counts)
+        self.load_cell.set_calibration(self._counts_per_gram, self._tare_counts)
         self.gcode.respond_info("Load cell calibration settings:\n\n"
             "counts_per_gram: %.6f\n"
             "reference_tare_counts: %i\n\n"
@@ -220,142 +262,127 @@ class LoadCellGuidedCalibrationHelper:
                 "Check wiring and consider using a higher sensor gain.")
         gcmd.respond_info("Accept calibration with the ACCEPT command.")
 
-# Utility to easily collect some samples for later analysis
+# Utility to collect some samples from the LoadCell for later analysis
 # Optionally blocks execution while collecting with reactor.pause()
 # can collect a minimum n samples or collect until a specific print_time
 # samples returned in [[time],[force],[counts]] arrays for easy processing
 RETRY_DELAY = 0.05  # 20Hz
 class LoadCellSampleCollector():
-    def __init__(self, load_cell, reactor):
+    def __init__(self, printer, load_cell):
+        self._printer = printer
         self._load_cell = load_cell
-        self._reactor = reactor
+        self._reactor = printer.get_reactor()
         self._mcu = load_cell.sensor.get_mcu()
         self.min_time = 0.
         self.max_time = float("inf")
-        self.finished = False
-        self._samples = collections.deque()
-        self._client = None
-    def _on_samples(self, data):
-        samples = data["params"]['samples']
+        self.min_count = float("inf")  # In Python 3.5 math.inf is better
+        self.is_started = False
+        self._samples = []
+    def _on_samples(self, msg):
+        if not self.is_started:
+            return False  # already stopped, ignore
+        samples = msg['data']
         for sample in samples:
             time = sample[0]
             if time >= self.min_time and time <= self.max_time:
                 self._samples.append(sample)
-            if time > self.max_time:
-                self.stop_collecting()
-    def start_collecting(self, min_time=0., max_time=float("inf")):
-        self.stop_collecting()
-        self._samples.clear()
-        self.min_time = min_time
-        self.max_time = max_time
-        self.finished = False
-        self._client = self._load_cell.subscribe(self._on_samples)
-    def stop_collecting(self):
-        if self.is_collecting():
-            self._client.close()
-            self._client = None
-    def get_samples(self):
-        return list(self._samples)
-    def is_collecting(self):
-        return self._client is not None
-    # return true when the last sample has a time after the target time
-    def _time_test(self, print_time):
-        collector = self
-        def test():
-            return not collector.is_collecting()
-        return test
-    # return true when a set number of samples have been collected
-    def _count_test(self, target):
-        def test():
-            return len(self._samples) >= target
-        return test
-    def _collect_until_test(self, test, timeout):
-        if not self.is_collecting():
-            self.start_collecting()
-        while self.is_collecting() and not test():
+        if len(self._samples) >= self.min_count or time > self.max_time:
+            self.is_started = False
+        return self.is_started
+    def _finish_collecting(self):
+        self.is_started = False
+        self.min_time = 0.
+        self.max_time = float("inf")
+        self.min_count = float("inf")  # In Python 3.5 math.inf is better
+        samples = self._samples
+        self._samples = []
+        return samples
+    def _collect_until(self, timeout):
+        self.start_collecting()
+        while self.is_started:
             now = self._reactor.monotonic()
-            print_time = self._mcu.estimated_print_time(now)
-            if (print_time > timeout):
-                raise Exception("LoadCellSampleCollector timed out")
+            if (self._mcu.estimated_print_time(now) > timeout):
+                raise self._printer.command_error(
+                                Exception("LoadCellSampleCollector timed out"))
             self._reactor.pause(now + RETRY_DELAY)
-        self.stop_collecting()
-        return self.get_samples()
-    # block execution until at least n samples are collected
-    def collect_samples(self, samples=1):
+        return self._finish_collecting()
+    # start collecting with no automatic end to collection
+    def start_collecting(self, min_time=None):
+        if self.is_started:
+            return
+        self.min_time = min_time if min_time is not None else self.min_time
+        self.is_started = True
+        self._load_cell.add_client(self._on_samples)
+    # stop collecting immediatly and return results
+    def stop_collecting(self):
+        return self._finish_collecting()
+    # block execution until at least min_count samples are collected
+    def collect_min(self, min_count=1):
+        self.min_count = min_count
+        if len(self._samples) >= min_count:
+            return self._finish_collecting()
         now = self._reactor.monotonic()
         print_time = self._mcu.estimated_print_time(now)
-        timeout = print_time + 1. + \
-            (samples / self._load_cell.sensor.get_samples_per_second())
-        return self._collect_until_test(self._count_test(samples), timeout)
-    # block execution until a sample is returned with a timestamp after time
-    def collect_until(self, time=None):
-        now = self._reactor.monotonic()
-        target = now if time is None else time
-        if not self.is_collecting():
-            self.start_collecting(max_time=target)
-        self.max_time = target
-        timeout = 1. + target
-        return self._collect_until_test(self._time_test(target), timeout)
+        sps = self._load_cell.sensor.get_samples_per_second()
+        return self._collect_until(print_time + 1. + (min_count / sps))
+    # block execution until a sample is returned with a timestamp after max_time
+    def collect_until(self, max_time=None):
+        self.max_time = max_time
+        if (len(self._samples) and self._samples[-1][0] >= max_time):
+            return self._finish_collecting()
+        return self._collect_until(self.max_time + 1.)
 
 # Printer class that controls the load cell
 class LoadCell:
-    def __init__(self, config):
+    def __init__(self, config, sensor):
         try:
             import numpy
         except Exception:
             raise config.error("LoadCell requires the numpy module")
         self.printer = printer = config.get_printer()
-        self.name = name = config.get_name()
-        # Sensor type
-        sensors = {"hx711": hx71x.HX711,
-                   "hx717": hx71x.HX717,
-                   'multi_hx711': multi_hx71x.MultiHX711,
-                   'multi_hx717': multi_hx71x.MultiHX717
-                }
-        sensor_type = config.getchoice('sensor_type', {s: s for s in sensors})
-        sensor = sensors[sensor_type](config)
-        # sensor must implement LoadCellDataSource
-        self.sensor = multiplex_adc.MultiplexAdcSensorWrapper(config, sensor)
-        self.trailing_counts = collections.deque(maxlen=24)
-        self.is_in_use = False
-        self.in_use_print_time = 0
-        self.reference_tare_counts = config.getint('reference_tare_counts'
-                                                   , default=None)
+        self.config_name = config.get_name()
+        self.name = config.get_name().split()[-1]
+        self.sensor = sensor #must implement BulkSensorAdc
+        buffer_size = sensor.get_samples_per_second() // 2
+        self._force_buffer = collections.deque(maxlen=buffer_size)
+        self.reference_tare_counts = config.getint('reference_tare_counts',
+                                                   default=None)
         self.tare_counts = self.reference_tare_counts
-        self.min_counts_per_gram = 1.
-        self.counts_per_gram = config.getfloat('counts_per_gram'
-                                , minval=self.min_counts_per_gram, default=None)
+        self.counts_per_gram = config.getfloat('counts_per_gram', minval=1,
+                                               default=None)
         LoadCellCommandHelper(config, self)
         # webhooks support
-        self.api_dump = WebhooksApiDumpRepeater(printer, "load_cell/dump_force",
-                        "load_cell", name,
-                        {"header": ["time", "force (g)", "counts"]})
+        self.wh_transformer = WebhooksTransformer(printer, sensor,
+                                                  self._sensor_data_event)
+        header = {"header": ["time", "force (g)", "counts", "tare_counts"]}
+        self.wh_transformer.add_mux_endpoint("load_cell/dump_force",
+                                               "load_cell", self.name, header)
         # startup, when klippy is ready, start capturing data
         printer.register_event_handler("klippy:ready", self._handle_ready)
     def _handle_ready(self):
-        self.sensor_client = self.sensor.subscribe(self._sensor_data_event)
+        self.add_client(self._on_sample)
         # announce calibration status on ready
         if self.is_calibrated():
             self.printer.send_event("load_cell:calibrate", self)
         if self.is_tared():
             self.printer.send_event("load_cell:tare", self)
+
     # convert raw counts to grams and broadcast to clients
-    def _sensor_data_event(self, data):
-        if not data.get("params", {}).get("samples"):
-            return
+    def _sensor_data_event(self, msg):
+        data = msg.get("data")
+        if data is None:
+            return None
         samples = []
-        for row in data["params"]["samples"]:
+        for row in data:
             # [time, grams, counts, tare_counts]
             samples.append([row[0],
                             self.counts_to_grams(row[1]),
                             row[1],
-                            self.counts_to_grams(self.tare_counts)])
-        self.api_dump.send({'samples': samples})
+                            self.tare_counts])
+        return {'data': samples}
     # get internal events of force data
-    def subscribe(self, callback):
-        client = multiplex_adc.EventDumpClient(callback)
-        self.api_dump.add_client(multiplex_adc.WebRequestShim(client))
-        return client
+    def add_client(self, callback):
+        self.wh_transformer.add_client(callback)
     def tare(self, tare_counts):
         self.tare_counts = int(tare_counts)
         self.printer.send_event("load_cell:tare", self)
@@ -368,8 +395,10 @@ class LoadCell:
         self.counts_per_gram = abs(counts_per_gram)
         self.reference_tare_counts = int(tare_counts)
         configfile = self.printer.lookup_object('configfile')
-        configfile.set(self.name, 'counts_per_gram', "%.5f" % (counts_per_gram))
-        configfile.set(self.name, 'tare_counts', "%.5f" % (tare_counts))
+        configfile.set(self.config_name, 'counts_per_gram',
+                       "%.5f" % (counts_per_gram))
+        configfile.set(self.config_name, 'reference_tare_counts',
+                       "%.5f" % (tare_counts))
         self.printer.send_event("load_cell:calibrate", self)
     def counts_to_grams(self, sample):
         if not self.is_calibrated() or not self.is_tared():
@@ -377,27 +406,41 @@ class LoadCell:
         return float(sample - self.tare_counts) / (self.counts_per_gram)
     # The maximum range of the sensor based on its bit width
     def saturation_range(self):
-        size = pow(2, (self.get_bits() - 1))
-        return -1 * (size), (size - 1)
+        return self.sensor.get_range()
     # convert raw counts to a +/- percentage of the sensors range
     def counts_to_percent(self, counts):
         min, max = self.saturation_range()
         return (float(counts) / float(max)) * 100.
-    # grab 1 second of load cell data and average it
-    # performs safety checks for saturation and under-counts
+    # read 1 second of load cell data and average it
+    # performs safety checks for saturation
     def avg_counts(self, num_samples=None):
         import numpy as np
         if num_samples is None:
             num_samples = self.sensor.get_samples_per_second()
-        samples = self.get_collector().collect_samples(num_samples)
+        samples = self.get_collector().collect_min(num_samples)
         # check samples for saturated readings
         min, max = self.saturation_range()
         for sample in samples:
             if sample[2] >= max or sample[2] <= min:
-                raise SaturationException(
+                raise self.printer.command_error(
                     "Some samples are saturated (+/-100%)")
         counts = np.asarray(samples)[:, 2].astype(float)
         return np.average(counts)
+    def _on_sample(self, msg):
+        if not (self.is_calibrated() and self.is_tared()):
+            return True
+        samples = msg['data']
+        for sample in samples:
+            self._force_buffer.append(sample[1])
+        return True
+    def _force_g(self):
+        if self.is_calibrated() and self.is_tared():
+            import numpy as np
+            return {"force_g": round(np.average(self._force_buffer), 1),
+                    "min_force_g": round(np.min(self._force_buffer), 1),
+                    "max_force_g": round(np.max(self._force_buffer), 1),
+                    "std_force_g": round(np.std(self._force_buffer), 6)}
+        return {}
     def is_tared(self):
         return self.tare_counts is not None
     def is_calibrated(self):
@@ -405,8 +448,6 @@ class LoadCell:
                 and self.reference_tare_counts is not None)
     def get_sensor(self):
         return self.sensor
-    def get_bits(self):
-        return self.sensor.sensor.get_bits()
     def get_reference_tare_counts(self):
         return self.reference_tare_counts
     def get_tare_counts(self):
@@ -414,12 +455,21 @@ class LoadCell:
     def get_counts_per_gram(self):
         return self.counts_per_gram
     def get_collector(self):
-        return LoadCellSampleCollector(self, self.printer.get_reactor())
+        return LoadCellSampleCollector(self.printer, self)
     def get_status(self, eventtime):
-        return {'is_calibrated': self.is_calibrated()
-                , 'reference_tare_counts': self.reference_tare_counts
-                , 'counts_per_gram': self.counts_per_gram
-                , 'tare_counts': self.tare_counts }
+        status = self._force_g()
+        status.update({'is_calibrated': self.is_calibrated(),
+                       'reference_tare_counts': self.reference_tare_counts,
+                       'counts_per_gram': self.counts_per_gram,
+                       'tare_counts': self.tare_counts})
+        return status
+
+def load_config(config):
+    # Sensor types
+    sensors = {}
+    sensors.update(hx71x.HX71X_SENSOR_TYPES)
+    sensor_class = config.getchoice('sensor_type', sensors)
+    return LoadCell(config, sensor_class(config))
 
 def load_config_prefix(config):
-    return LoadCell(config)
+    return load_config(config)

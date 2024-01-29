@@ -173,7 +173,6 @@ load_cell_endstop_report_sample(struct load_cell_endstop *lce
     // check for safety limit violations first
     const uint8_t is_safety_trigger = sample <= lce->safety_counts_min
                                         || sample >= lce->safety_counts_max;
-    // REVIEW: when homing only, shutdown() if the safety limits are violated
     if (is_homing && is_safety_trigger) {
         shutdown("Load cell endstop: too much force!");
     }
@@ -194,7 +193,7 @@ load_cell_endstop_report_sample(struct load_cell_endstop *lce
         /*// DEBUG: uncomment to log filter trigger in grams
         if (is_trigger) {
             output("Filter Trigger at %i grams"
-                    , (uint32_t)(abs_grams >> FRAC_BITS));
+                    , (uint32_t)(abs_grams >> FIXEDQ12_FRAC_BITS));
         }*/
     } else {
         // static threashold triggering for QUERY_ENDSTOPS and non-filter use
@@ -386,14 +385,14 @@ command_load_cell_endstop_home(uint32_t *args)
 {
     struct load_cell_endstop *lce = load_cell_endstop_oid_lookup(args[0]);
     sched_del_timer(&lce->time);
-    lce->trigger_ticks = 0;
     // clear the homing trigger flag
     clear_flag(FLAG_IS_HOMING_TRIGGER, lce);
+    clear_flag(FLAG_IS_HOMING, lce);
+    lce->trigger_ticks = 0;
+    lce->ts = NULL;
     // 0 samples indicates homing is finished
     if (args[3] == 0) {
         // Disable end stop checking
-        lce->ts = NULL;
-        clear_flag(FLAG_IS_HOMING, lce);
         return;
     }
     lce->ts = trsync_oid_lookup(args[1]);
@@ -403,10 +402,10 @@ command_load_cell_endstop_home(uint32_t *args)
     lce->rest_ticks = args[5];
     lce->watchdog_max = args[6];
     lce->watchdog_count = 0;
-    set_flag(FLAG_IS_HOMING, lce);
-    lce->time.func = watchdog_event;
     reset_filter_state(lce);
+    lce->time.func = watchdog_event;
     sched_add_timer(&lce->time);
+    set_flag(FLAG_IS_HOMING, lce);
 }
 DECL_COMMAND(command_load_cell_endstop_home,
              "load_cell_endstop_home oid=%c trsync_oid=%c trigger_reason=%c"

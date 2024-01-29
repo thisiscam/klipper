@@ -718,6 +718,39 @@ together with either of SHAPER_TYPE_X and SHAPER_TYPE_Y parameters.
 See [config reference](Config_Reference.md#input_shaper) for more
 details on each of these parameters.
 
+### [load_cell]
+
+The following commands are enabled if a
+[load_cell config section](Config_Reference.md#load_cell) or
+[load_cell_probe config section](Config_Reference.md#load_cell_probe) has been
+enabled.
+
+### LOAD_CELL_DIAGNOSTIC
+`LOAD_CELL_DIAGNOSTIC [LOAD_CELL=<config_name>]`: This command collects 10
+seconds of load cell data and reports statistics that may help you verify proper
+operation of the load cell. This command can be run on both calibrated and
+uncalibrated load cells.
+
+### CALIBRATE_LOAD_CELL
+`CALIBRATE_LOAD_CELL [LOAD_CELL=<config_name>]`: Start the guided calibration
+utility. Calibration is a 3 step process:
+1. First you remove all load from the load cell and run the `TARE` command
+1. Next you apply a known load to the load cell and run the
+`CALIBRATE GRAMS=nnn` command
+1. Finally use the `ACCEPT` command to save the results
+
+You can cancel the calibration process at any time with `ABORT`.
+
+### TARE_LOAD_CELL
+`TARE_LOAD_CELL [LOAD_CELL=<config_name>]`: This works just like the tare button
+on digital scale. It sets the current raw reading of the load cell to be the
+zero point reference value. The response is the percentage of the sensors range
+that was read and the raw value in counts.
+
+### READ_LOAD_CELL load_cell="name"
+`READ_LOAD_CELL [LOAD_CELL=<config_name>]`:
+This command takes a reading from the load cell.
+
 ### [manual_probe]
 
 The manual_probe module is automatically loaded.

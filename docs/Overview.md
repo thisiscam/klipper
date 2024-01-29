@@ -29,6 +29,7 @@ communication with the Klipper developers.
   - [Probe calibrate](Probe_Calibrate.md): Calibration of automatic Z
     probes.
   - [BL-Touch](BLTouch.md): Configure a "BL-Touch" Z probe.
+  - [Load cell probes](LoadCellProbe.md): Configure a load cell probe.
   - [Manual level](Manual_Level.md): Calibration of Z endstops (and
     similar).
   - [Bed Mesh](Bed_Mesh.md): Bed height correction based on XY
@@ -50,6 +51,7 @@ communication with the Klipper developers.
     macros (and similar).
 - [TMC Drivers](TMC_Drivers.md): Using Trinamic stepper motor drivers
   with Klipper.
+- [Load cells](LoadCell.md): Using load cells to measure force & weight
 - [Multi-MCU Homing](Multi_MCU_Homing.md): Homing and probing using multiple micro-controllers.
 - [Slicers](Slicers.md): Configure "slicer" software for Klipper.
 - [Skew correction](Skew_Correction.md): Adjustments for axes not

@@ -2,9 +2,9 @@
 
 ## Related Documentation
 
-* [load_cell] Config Reference
-* [load_cell] G-Code Commands
-* [load_cell_probe] Config Reference
+* [load_cell_probe](Config_Reference.md#load_cell_probe) Config Reference
+* [load_cell](Config_Reference.md#load_cell) Config Reference
+* [load_cell](G-Codes.md#load_cell) G-Code Commands
 
 ## Verify the Load Cell First
 A [load_cell_probe] is also a [load_cell] and G-code commands related to

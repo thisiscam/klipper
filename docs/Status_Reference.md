@@ -301,9 +301,9 @@ The following information is available for `[load_cell_probe]`:
 - all items from [load_cell](Status_Reference.md#load_cell)
 - all items from [probe](Status_Reference.md#probe)
 - 'trigger_counts': the number of counts
-- 'tare_counts': self.tare_counts,
-            'sample_count': self.sample_count,
-            'last_trigger_time': self.last_trigger_time
+- 'endstop_tare_counts': the load cell probe keeps a tare value independent of
+the load cell. This re-set at the start of each probe.
+- 'last_trigger_time': timestamp of the last homing trigger
 
 ## manual_probe
 

@@ -579,8 +579,7 @@ class LoadCellEndstop:
             cq=cmd_queue)
     def get_status(self, eventtime):
         return {
-            'tare_counts': self.tare_counts,
-            'sample_count': self.trigger_count,
+            'endstop_tare_counts': self.tare_counts,
             'last_trigger_time': self.last_trigger_time
         }
     def _handle_load_cell_tare(self, lc):

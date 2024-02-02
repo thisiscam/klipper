@@ -5,9 +5,8 @@ probes.
 
 ## Related Documentation
 
-* [load_cell] Config Reference
-* [load_cell] G-Code Commands
-* [load_cell_probe] Config Reference
+* [load_cell](Config_Reference.md#load_cell) Config Reference
+* [load_cell](G-Codes.md#load_cell) G-Code Commands
 
 ## Calibrating a Load Cell
 
@@ -141,15 +140,15 @@ connect to the web socket.
 
 ### Configuring the Page
 
-There are 3 boxes on the page:
+There are 2 boxes on the page:
 - `Moonraker hostname`: enter the hostname of your printer without the
 `https://` or `:7130`.
 e.g. `voron24.local`
-- `[load_cell]`: If you have a load cell configured, select this option
-    - If you named the load_cell in the config ([load_cell name]), enter the
-`name` here.
-- `[load_cell_probe]`: If you have a load cell probe configured, select this
-option.
+- `[load_cell]`, `[load_cell name], [load_cell_probe]`: Enter the name of the
+config section that you want to monitor just as it appears in your config.
+
+You might need to reload the page after entering these values to get the
+connection to work.
 
 
 

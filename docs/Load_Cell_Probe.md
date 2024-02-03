@@ -10,7 +10,7 @@
 A [load_cell_probe] is also a [load_cell] and G-code commands related to
 [load_cell] work with [load_cell_probe]. Before attempting to use a load cell
 probe, follow the directions for calibrating the load cell with
-`CALIBRATE_LOAD_CELL` and checking its operation with `LOAD_CELL_DIAGNOSTIC`. 
+`CALIBRATE_LOAD_CELL` and checking its operation with `LOAD_CELL_DIAGNOSTIC`.
 
 ## Verify Probe Operation Before Homing
 
@@ -24,7 +24,7 @@ that the probe works before probing or homing the machine:
 1. Apply a small force to the load cell and run `QUERY_PROBE`. It should report:
 
    `// probe: TRIGGERED`
-   
+
 If not you should not attempt to use the probe, it may crash your printer. Check
 your configuration and `LOAD_CELL_DIAGNOSTIC` carefully to look for issues.
 
@@ -40,14 +40,40 @@ klipper front ends.
 
 ## Probing Temperature
 
-Currently we suggest keeping the nozzle temperature below the level that causes
+Currently, we suggest keeping the nozzle temperature below the level that causes
 the filament to ooze while homing and probing. For most filaments this is a
-limit of 150C but you may need t go lower for PLA.
+limit of 150C, but you may need to lower it for PLA. 140C is a good starting
+point.
 
-Klipper does not yet have a generic way to detect "bad taps" due to filament
-ooze. They may or may not be rejected by the existing code.
+Klipper does not yet have a generic way to detect poor quality taps due to
+filament ooze. The existing code may decide that a tap is valid when it is of
+poor quality. Classifying these poor quality taps is an area of active research.
 
-## Temperature Protection
+Klipper also lacks support for re-locating a probe point if the
+location has become fouled by filament ooze. Modules like `quad_gantry_level`
+will repeatedly probe the same coordinates even if a probe previously failed
+there.
+
+## Nozzle Cleaning
+
+Before probing the nozzle should be clean. You can do this manually before
+every print. You can also implement a nozzle scrubber and automate the process.
+Here is a suggested sequence:
+
+1. Wait for the nozzle to heat up to probing temp (e.g. `M109 S140`)
+1. Home the machine (`G28`)
+1. Scrub the nozzle on a brush
+1. Heat soak the print bed
+1. Perform probing tasks, QGL, bed mesh etc.
+
+### Nozzle Cleaner GCode
+[load_cell_probe] support a `nozzle_cleaner_gcode` option. This is invoked when
+an invalid tap is detected during a probe. This is of limited use with the
+current code because klipper cant detect the poor quality taps caused by ooze.
+This is mainly intended to be used in combination with a bad_tap module that can
+detect poor quality taps.
+
+## Hot Nozzle Protection
 
 The Voron project has a great macro for protecting your print surface from the
 hot nozzle. See [Voron Tap's `activate_gcode`](https://github.com/VoronDesign/Voron-Tap/blob/main/config/tap_klipper_instructions.md)
@@ -57,47 +83,41 @@ It is highly suggested to add something like this to your config.
 ## Temperature Compensation
 
 The nozzle will expand after heating to printing temperatures. This will cause
-the nozzle to get closer to the print surface. 
+the nozzle to get closer to the print surface. If we calculate how much the
+nozzle expands its possible to compensate for this with
+[[z_thermal_adjust]](Config_Reference.md#z_thermal_adjust).
 
-If we calculate how much the nozzle expands its possible to compensate for this
-with a macro:
+### Calculating the `temp_coeff` for `[z_thermal_adjust]`
 
-```
-[gcode_macro EXTRUDER_SET_THERMAL_COMP]
-gcode:
-    {% set expansion_coefficient = 0.00059 %} # measured empirically
-    # pass in PRINT_TEMP= the final extruder temp before heating up
-    {% set print_temp = params.PRINT_TEMP | float %}
-    {% set temp_delta = print_temp - printer.extruder.target %}
-    {% set thermal_comp_z = expansion_coefficient * temp_delta %}
-    { action_respond_info('Extruder thermal compensation: %.5fmm for temperature
-                           change %.1fC' % (thermal_comp_z, temp_delta)) }
-    SET_GCODE_OFFSET Z_ADJUST={thermal_comp_z} MOVE=1
-```
+1. Make sure the nozzle is clean and no filament is loaded. It must not ooze
+during the test.
+1. Run `PROBE_ACCURACY` with the nozzle at probing temperature (e.g. 140C) and
+record the average z value from the results as `cold_avg`.
+2. Heat the nozzle up to the highest expected printing temp (e.g. 280C) and
+wait 1 minute.
+3. Run `PROBE_ACCURACY` again and record the average z value from the results
+as `hot_avg`.
 
-Call the macro while the nozzle is still set to the probing temperature. Pass in
-the temperature that you will be printing at:
+Because the nozzle should get longer as it heats up, you should find that the
+`hot_avg` is smaller than the `cold_avg`. Calculate the `temp_coeff` with this
+formula:
 
 ```
-EXTRUDER_SET_THERMAL_COMP PRINT_TEMP={print_temp}
+(hot_avg - cold_avg) / (temperature_change) = temp_coeff
 ```
 
-### Calculating the `expansion_coefficient`
+The expected result is a negative value for `temp_coeff`.
 
-1. Make sure the nozzle is clean and no filament is loaded. It must no ooze.
-1. Run `PROBE_ACCURACY` with the nozzle at probing temperature (e.g. 140C)
-2. Heat the nozzle up to the highest expected printing temp (1.g. 280C)
-3. Run `PROBE_ACCURACY` again
-
-Take the average value from each of the `PROBE_ACCURACY` runs and subtract them,
-then divide by the temperature change in C.
+### Configure `[z_thermal_adjust]`
+Set up z_thermal_adjust to reference the `extruder` as the source of temperature
+data. E.g.:
 
 ```
-expansion_coefficient = (cold_avg - hot_avg) / (285 - 140)
+[z_thermal_adjust nozzle]
+temp_coeff=-0.00055
+sensor=extruder
+max_z_adjustment: 0.1
 ```
-
-(we are looking to build this into the `[z_thermal_adjust]` module soon with
-multiple named compensations)
 
 ## Continuous Tear Filters
 
@@ -105,7 +125,7 @@ Klipper implements a butterworth filter on the MCU to provide continuous tearing
 of the load cell while probing. Continuous tearing means the 0 value moves with
 drift caused by external factors like bowden tubes and thermal changes. This is
 aimed at toolhead sensors that experience lots of external forces that change
-while probing. 
+while probing.
 
 The filter parameters should be selected based on drift seen on the printer
 during normal operation. A Jupyter notebook is provided in scripts,
@@ -114,8 +134,8 @@ data and FFTs.
 
 For those just trying to get a filter working follow these suggestions:
 * The only essential option is `continuous_tear_highpass`. A conservative
-starting value is `0.5`. Prusa shipped the MK4 with a setting on `0.8` and the
-XL with `11.2`. This is probably a safe range to experiment with. Setting this
+starting value is `0.5`. Prusa shipped the MK4 with a setting on `0.8`Hz and the
+XL with `11.2`Hz. This is probably a safe range to experiment with. Setting this
 value too high will result in excess force going through the tool head.
 * Keep `continuous_tear_trigger_force_grams` low. The default is `40`g. The
 filter keeps the internal grams value very close to 0 so a large trigger force
@@ -124,7 +144,7 @@ is not needed.
 and this will keep your toolhead safe while experimenting. If you hit this limit
 the `continuous_tear_highpass` value may be too high, or your
 `reference_tare_counts` may need adjusting to be closet to the sensors 0 at
-startup.  
+startup.
 
 ## Suggestions for Load Cell Tool Boards
 
@@ -144,7 +164,7 @@ moving fast. Sample rates below 250Hz will require slower probing speeds. They
 also increase the force on the toolhead due to longer delays between
 measurements. E.g. a 500Hz sensor moving at 5mm/s has the same safety factor as
 a 100Hz sensor moving at only 1mm/s.
-* If designing for under-bed applications and you want to sense multiple load
+* If designing for under-bed applications, and you want to sense multiple load
 cells, use a chip that can sample all of its inputs simultaneously. Multiplex
 ADCs that require switching channels have a settling of several samples. This
 should be avoided for probing applications.
@@ -158,16 +178,21 @@ We strongly suggest using larger capacitors than specified by the ADC chip
 manufacturer. ADC chips are usually targeted at low noise environments, like
 battery powered devices. Sensor manufacturers suggested application notes
 generally assume a quiet power supply. Treat their suggested capacitor values as
-minimums. 
+minimums.
 
 3D printers put huge amounts of noise onto the 5V bus and this can ruin the
-sensors accuracy. Test the sensor on the board with a typical 3D printer power
-supply and active stepper drivers before deciding on smoothing capacitor sizes.  
+sensor's accuracy. Test the sensor on the board with a typical 3D printer power
+supply and active stepper drivers before deciding on smoothing capacitor sizes.
+
+### Grounding & Ground Planes
+These chips contain an analog component that is very vulnerable to noise and
+ESD. A large ground plane under the chip can help with noise. The board should
+have proper grounding back to the DC supply or earth is available.
 
 ### HX711 and HX717 Notes
 
 We know this sensor is popular because of its low cost and availability in the
-supply chain. However this is a sensor with several drawbacks. 
+supply chain. However, this is a sensor with several drawbacks.
 
 The HX71x sensors use bit bang communication which has a high overhead on the
 MCU. Using a sensor that communicates via SPI would save resources on the tool
@@ -182,4 +207,4 @@ of its higher sample rate (320 vs 80).
 If designing a board for an under-bed sensor with multiple chips, the clock
 lines should be tied to an external clock source. Klipper can compensate for a
 single chip's clock drift. But for multiple chips with independent clock drift
-the estimated measurement time will be less accurate. 
+the estimated measurement time will be less accurate.

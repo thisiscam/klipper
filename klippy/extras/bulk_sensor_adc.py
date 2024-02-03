@@ -8,7 +8,7 @@
 # data from the MCU.
 class BulkSensorAdc(object):
     # return the MCU the sensor is attached to
-    def get_mcu(slef):
+    def get_mcu(self):
         return None
     # get the number of samples per second that the sensor is configured for
     def get_samples_per_second(self):
@@ -16,7 +16,7 @@ class BulkSensorAdc(object):
     # returns a tuple of the minimum and maximum value of the sensor, used to
     # detect if a data value is saturated
     def get_range(self):
-        return (-1, 1)
+        return -1, 1
     # subscribe to data being published from the sensor
     # callback is called with a list containing (time, counts) tuples:
     # [(time, counts), (time, counts), ...]
@@ -35,7 +35,7 @@ class LoadCellEndstopSensor(object):
 
 # Helper for ClockSyncRegression that handles generating timestamps
 # while processing a batch of samples
-#REVIEW: I want to move this to bulk_sensor
+#TODO: REVIEW: I want to move this to bulk_sensor
 class TimestampHelper:
     def __init__(self, clock_sync, clock_updater, samples_per_msg):
         self.clock_sync = clock_sync

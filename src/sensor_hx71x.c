@@ -301,7 +301,6 @@ DECL_COMMAND(command_config_hx71x, "config_hx71x oid=%c"
 void
 command_query_hx71x(uint32_t *args)
 {
-    
     uint8_t oid = args[0];
     struct hx71x_adc *hx71x = oid_lookup(oid, command_config_hx71x);
     sched_del_timer(&hx71x->timer);
@@ -337,7 +336,7 @@ command_query_hx71x_status(const uint32_t *args)
     const uint32_t end_t = timer_read_time();
     sensor_bulk_status(&hx71x->sb, oid, start_t, (end_t - start_t)
                       , pending_bytes);
-} 
+}
 DECL_COMMAND(command_query_hx71x_status, "query_hx71x_status oid=%c");
 
 // Background task that performs measurements

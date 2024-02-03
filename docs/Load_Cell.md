@@ -33,7 +33,7 @@ Put a digital scale on the printers bed and gently lower the toolhead onto the
 scale (or raise the bed into the toolhead if your bed moves). You may be able to
 do to do this using the `FORCE_MOVE` command. But more likely you will have to
 manually moving the z axis with the motors off until the toolhead presses on the
-scale. 
+scale.
 
 A good calibration force would ideally be a large percentage of the load cell's
 rated capacity. E.g. if you have a 5Kg load cell you would ideally calibrate it
@@ -149,20 +149,3 @@ config section that you want to monitor just as it appears in your config.
 
 You might need to reload the page after entering these values to get the
 connection to work.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

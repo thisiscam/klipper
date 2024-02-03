@@ -12,7 +12,7 @@ from .bulk_sensor_adc import (BulkSensorAdc, LoadCellEndstopSensor,
 #
 # Constants
 #
-BYTES_PER_SAMPLE = 4 # samples are 4 byte wide unsigned integers
+BYTES_PER_SAMPLE = 4  # samples are 4 byte wide unsigned integers
 MAX_SAMPLES_PER_BLOCK = bulk_sensor.MAX_BULK_MSG_SIZE // BYTES_PER_SAMPLE
 UPDATE_INTERVAL = 0.10
 MAX_CHIPS = 4
@@ -33,12 +33,12 @@ class HX71xBase(BulkSensorAdc, LoadCellEndstopSensor):
         ## Chip options
         chips = []
         for i in range(1, 5):
-            dout_pin = config.get('dout_pin%i' % (i), default=None)
+            dout_pin = config.get('dout_pin%i' % (i,), default=None)
             if dout_pin is None:
                 break
-            sclk_pin = config.get('sclk_pin%i' % (i), default=None)
+            sclk_pin = config.get('sclk_pin%i' % (i,), default=None)
             if sclk_pin is None:
-                raise config.error("HX71x config missing sclk_pin%i" % (i))
+                raise config.error("HX71x config missing sclk_pin%i" % (i,))
             chips.append((dout_pin, sclk_pin))
         self.chip_count = len(chips)
         if self.chip_count < 1:
@@ -60,7 +60,7 @@ class HX71xBase(BulkSensorAdc, LoadCellEndstopSensor):
             if pin['chip'] is not self.mcu:
                 raise config.error("HX71x config error: "
                     "All HX71x chips must be connected to the same MCU")
-        #REVIEW: what do about unused pins in the command?
+        #TODO: REVIEW: what do about unused pins in the command?
         # the pin names have to be valid, and they have to be strings
         # copying names feels hacky, is there a 'NONE' value?
         for i in range(self.chip_count, MAX_CHIPS):
@@ -80,7 +80,7 @@ class HX71xBase(BulkSensorAdc, LoadCellEndstopSensor):
         self.bytes_per_block = BYTES_PER_SAMPLE * self.chip_count
         self.blocks_per_msg = (bulk_sensor.MAX_BULK_MSG_SIZE
                                // self.bytes_per_block)
-        block_format = "<%di" % (self.chip_count)
+        block_format = "<%di" % (self.chip_count,)
         self._unpack_block = struct.Struct(block_format).unpack_from
         ## Bulk Sensor Setup
         self.bulk_queue = bulk_sensor.BulkDataQueue(self.mcu, oid=self.oid)
@@ -126,8 +126,8 @@ class HX71xBase(BulkSensorAdc, LoadCellEndstopSensor):
     # returns a tuple of the minimum and maximum value of the sensor, used to
     # detect if a data value is saturated
     def get_range(self):
-        max = (2 ** 24) * self.chip_count
-        return (-max, max)
+        range_max = (2 ** 24) * self.chip_count
+        return -range_max, range_max
     # add_Client interface, direct pass through to bulk_sensor API
     def add_client(self, callback):
         self.batch_bulk.add_client(callback)
@@ -196,7 +196,7 @@ class HX717(HX71xBase):
             # HX717 sps options
             {320: 320, 80: 80, 20: 20, 10: 10}, 320,
             # HX717 gain/channel options
-            {'A-128':1, 'B-64': 2, 'A-64': 3, 'B-8': 4}, 'A-128',
+            {'A-128': 1, 'B-64': 2, 'A-64': 3, 'B-8': 4}, 'A-128',
             allocate_endstop_oid)
 
 HX71X_SENSOR_TYPES = {

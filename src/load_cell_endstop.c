@@ -94,11 +94,11 @@ sosfilt(struct load_cell_endstop *lce, const fixedQ12_t grams_in) {
     for (int section = 0; section < lce->n_sections; section++) {
         fixedQ12_t next_val = fixedQ12_mul(lce->filter[section][0], cur_val)
                               + lce->filter_state[section][0];
-        lce->filter_state[section][0] = 
+        lce->filter_state[section][0] =
             fixedQ12_mul((lce->filter[section][1]), cur_val)
             - fixedQ12_mul((lce->filter[section][3]), next_val)
             + (lce->filter_state[section][1]);
-        lce->filter_state[section][1] = 
+        lce->filter_state[section][1] =
             fixedQ12_mul((lce->filter[section][2]), cur_val)
             - fixedQ12_mul((lce->filter[section][4]), next_val);
         cur_val = next_val;
@@ -177,7 +177,7 @@ load_cell_endstop_report_sample(struct load_cell_endstop *lce
         shutdown("Load cell endstop: too much force!");
     }
 
-    // Use filter if filter is ready and trigger_grams configured 
+    // Use filter if filter is ready and trigger_grams configured
     const uint8_t use_filter = is_flag_set(FLAG_IS_FILTER_READY, lce)
                                 && lce->trigger_grams != 0;
     uint8_t is_trigger;

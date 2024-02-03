@@ -1256,7 +1256,7 @@ See also: [extended g-code commands](G-Codes.md#z_thermal_adjust).
 #sensor:
 #   Name of a single temperature sensor to use as a temperature source. E.g.
 #   'temperature_sensor frame', 'extruder', 'heater_bed' etc. If this option
-#   is used the other sensor options are not used. 
+#   is used the other sensor options are not used.
 #sensor_type:
 #sensor_pin:
 #min_temp:
@@ -4496,7 +4496,7 @@ sensor_type:
 #   load cell endstops on the mcu.
 #counts_per_gram:
 #reference_tare_counts:
-#   These parameters muct be configured before the probe will operate.
+#   These parameters must be configured before the probe will operate.
 #   See the [load_cell] section for further details.
 #safety_limit_grams: 1000g
 #   The safe limit for probing force relative to the reference_tare_counts on
@@ -4531,7 +4531,7 @@ sensor_type:
 #   The number of samples over the trigger_force_grams threshold that will cause
 #   the probe to trigger. 1 is the default.
 #pullback_dist: 0.1
-#   The distance of the pullback move in mm. This move needs to be long enough 
+#   The distance of the pullback move in mm. This move needs to be long enough
 #   to bring the probe away from the bed after it makes contact.
 #pullback_speed: 0.4
 #   Speed of the pullback move. The default value is to move at a speed of 1
@@ -4595,13 +4595,13 @@ dout_pin1:
 #   were a single ADC with multipe simultanous outputs. The outputs are summed
 #   together to produce a single value. This is useful for under bed scales.
 #gain: A-128
-#   Valid values for `gain` are `A-128`, `A-64`, `B-32`. The default is `A-128`. 
-#   `A` denotes the input channel and the number denotes the gain. Only the 3 
-#   listed combinations are supported by the chip. Note that changing the gain 
+#   Valid values for `gain` are `A-128`, `A-64`, `B-32`. The default is `A-128`.
+#   `A` denotes the input channel and the number denotes the gain. Only the 3
+#   listed combinations are supported by the chip. Note that changing the gain
 #   setting also selects the channel being read.
 #sample_rate: 80
 #   Valid values for `sample_rate` are `10` or `80`. The default value is `80`.
-#   This must match the wiring of the chip. The sample rate cannot be changed 
+#   This must match the wiring of the chip. The sample rate cannot be changed
 #   in software.
 ```
 
@@ -4622,12 +4622,12 @@ dout_pin1:
 #   were a single ADC with multipe simultanous outputs. The outputs are summed
 #   together to produce a single value. This is useful for under bed scales.
 #gain: A-128
-#   Valid values for `gain` are `A-128`, `B-64`, `A-64`, `B-8`. 
-#   `A` denotes the input channel and the number denotes the gain setting. 
-#   Only the 4 listed combinations are supported by the chip. Note that 
+#   Valid values for `gain` are `A-128`, `B-64`, `A-64`, `B-8`.
+#   `A` denotes the input channel and the number denotes the gain setting.
+#   Only the 4 listed combinations are supported by the chip. Note that
 #   changing the gain setting also selects the channel being read.
 #sample_rate: 320
-#   Valid values for `sample_rate` are `320`, `80`, `20` or `10`. 
+#   Valid values for `sample_rate` are `320`, `80`, `20` or `10`.
 #   The default is `320`. This must match the wiring of the chip.
 #   The sample rate cannot be changed in software.
 ```

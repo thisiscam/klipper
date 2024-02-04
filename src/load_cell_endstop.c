@@ -184,7 +184,7 @@ load_cell_endstop_report_sample(struct load_cell_endstop *lce
     if (is_homing && use_filter) {
         if (sample < lce->filter_counts_min
                 || sample > lce->filter_counts_max) {
-            shutdown("Continuous tare drift limit exceeeded while homing");
+            shutdown("Continuous tare drift limit exceeded while homing");
         }
         const fixedQ12_t grams = counts_to_grams(lce, sample);
         const fixedQ12_t filtered_grams = sosfilt(lce, grams);

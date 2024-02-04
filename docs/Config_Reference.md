@@ -4503,23 +4503,23 @@ sensor_type:
 #   the load_cell. The default is +/-1Kg.
 #trigger_force_grams: 50.0
 #   The force that the probe will trigger at. 50g is the default.
-#continuous_tear_highpass: 0.8
-#   Enable optional continuous tearing while homing & probing to reject drift.
+#continuous_tare_highpass: 0.8
+#   Enable optional continuous taring while homing & probing to reject drift.
 #   The value is a frequency, in Hz, below which drift will be ignored.This
 #   option requires the SciPy library. Default: None
-#continuous_tear_lowpass: 100.0
+#continuous_tare_lowpass: 100.0
 #   The value is a frequency, in Hz, above which high frequency noise in the
 #   load cell will be igfiltered outnored. If this option is set,
-#   continuous_tear_highpass must also be set. Default: None
-#continuous_tear_notch: 50, 60
+#   continuous_tare_highpass must also be set. Default: None
+#continuous_tare_notch: 50, 60
 #   1 or 2 frequencies, in Hz, to filter out of the load cell data. This is
 #   intended to reject power line noise. If this option is set,
-#   continuous_tear_highpass must also be set. Default: None
-#continuous_tear_notch_quality: 2.0
+#   continuous_tare_highpass must also be set. Default: None
+#continuous_tare_notch_quality: 2.0
 #   Controls how narrow the range of frequencies are that the notch filter
 #   removes. Larger numbers produce a narrower filter. Minimum value is 0.5 and
 #   maximum is 3.0. Default: 2.0
-#continuous_tear_trigger_force_grams: 40.0
+#continuous_tare_trigger_force_grams: 40.0
 #   The force that the probe will trigger at whe using the continuous tearing
 #   filter. 40g is the default.
 #tap_filter_notch: 60.0
@@ -4539,7 +4539,7 @@ sensor_type:
 #settling_time: 0.375
 #   Additional time to wait before taring the probe. This allows any vibrations
 #   to settle and bowden tubes time to flex etc. This improves repeatability.
-#   If the continuous_tear_filter is used this may be set to 0.
+#   If the continuous_tare_filter is used this may be set to 0.
 #pullback_extra_time: 0.3
 #   Time to collect additional samples after the pullback move ends in seconds.
 #   This improves accuracy by giving the algorithm more points after the probe

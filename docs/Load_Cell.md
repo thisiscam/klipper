@@ -12,12 +12,13 @@ probes.
 
 Load cells are calibrated using the `CALIBRATE_LOAD_CELL` command. This is an
 interactive calibration utility that walks you though a 3 step process:
-1. First you establishing the 0 value of the load cell with the `TARE` command.
-This is the `reference_tare_counts` config value.
-1. Next you apply a known load or force to the load cell and run the
+1. First use the `TARE` command to establish the zero force value. This is the
+`reference_tare_counts` config value.
+2. Next you apply a known load or force to the load cell and run the
 `CALIBRATE GRAMS=nnn` command. From this the `counts_per_gram` value is
-calculated.
-1. Finally use the `ACCEPT` command to save the results.
+calculated. See [the next section](#applying-a-known-force-or-load) for some
+suggestions on how to do this.
+3. Finally, use the `ACCEPT` command to save the results.
 
 You can cancel the calibration process at any time with `ABORT`.
 
@@ -28,10 +29,10 @@ load cell is under a platform like a bed or filament holder it might be easiest
 to put a known mass on the platform. E.g. you could use a couple of 1KG filament
 spools.
 
-If your load cell is in the printers toolhead a different approach is easier.
+If your load cell is in the printer's toolhead a different approach is easier.
 Put a digital scale on the printers bed and gently lower the toolhead onto the
 scale (or raise the bed into the toolhead if your bed moves). You may be able to
-do to do this using the `FORCE_MOVE` command. But more likely you will have to
+do this using the `FORCE_MOVE` command. But more likely you will have to
 manually moving the z axis with the motors off until the toolhead presses on the
 scale.
 
@@ -87,10 +88,10 @@ using a web tool available here:
 
 [Klipper Load Cell Debugging Tool](https://observablehq.com/@garethky/klipper-load-cell-debugging-tool)
 
-The page loads from the secure [observablehq.com](observablehq.com) domain. It
-doesnt send anythign back to observablehq.com and communicates with the
-moonraker websocket over your local network. You will need to set up HTTPS in
-moonraker to get the websocket connection working. Here's how:
+The page loads from the secure [observablehq.com](http://observablehq.com)
+domain. It doesn't send anything back to observablehq.com and communicates with
+the moonraker websocket over your local network. You will need to set up HTTPS
+in moonraker to get the websocket connection working. Here's how:
 
 #### 1. Add CORS domains in `moonraker.config`
 

@@ -127,11 +127,12 @@ class LoadCellCommandHelper:
     cmd_LOAD_CELL_DIAGNOSTIC_help = "Check the health of the load cell"
     def cmd_LOAD_CELL_DIAGNOSTIC(self, gcmd):
         import numpy as np
-        gcmd.respond_info(
-            "Collecting load cell data for 10 seconds...")
-        sps = self.load_cell.sensor.get_samples_per_second()
+        gcmd.respond_info("Collecting load cell data for 10 seconds...")
         collector = self.load_cell.get_collector()
-        samples = collector.collect_min(sps * 10)
+        #TODO: sample collector could include this logic
+        stop = self.printer.get_reactor().monotonic()
+        stop = self.load_cell.sensor.get_mcu().estimated_print_time(stop) + 10.
+        samples = collector.collect_until(stop)
         counts = np.asarray(samples)[:, 2].astype(int)
         range_min, range_max = self.load_cell.saturation_range()
         good_count = 0
@@ -144,8 +145,10 @@ class LoadCellCommandHelper:
         unique_counts = np.unique(counts)
         gcmd.respond_info("Samples Collected: %i" % (len(samples)))
         if len(samples) > 2:
+            sensor_sps = self.load_cell.sensor.get_samples_per_second()
             sps = float(len(samples)) / (samples[-1][0] - samples[0][0])
-            gcmd.respond_info("Measured samples per second: %.1f" % (sps,))
+            gcmd.respond_info("Measured samples per second: %.1f, "
+                              "configured: %.1f" % (sps, sensor_sps))
         gcmd.respond_info("Good samples: %i, Saturated samples: %i, Unique"
                           " values: %i" % (good_count, saturation_count,
                           len(unique_counts)))

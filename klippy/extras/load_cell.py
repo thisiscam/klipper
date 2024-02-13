@@ -129,10 +129,10 @@ class LoadCellCommandHelper:
         import numpy as np
         gcmd.respond_info("Collecting load cell data for 10 seconds...")
         collector = self.load_cell.get_collector()
-        #TODO: sample collector could include this logic
-        stop = self.printer.get_reactor().monotonic()
-        stop = self.load_cell.sensor.get_mcu().estimated_print_time(stop) + 10.
-        samples = collector.collect_until(stop)
+        reactor = self.printer.get_reactor()
+        collector.start_collecting()
+        reactor.pause(reactor.monotonic() + 10.)
+        samples = collector.stop_collecting()
         counts = np.asarray(samples)[:, 2].astype(int)
         range_min, range_max = self.load_cell.saturation_range()
         good_count = 0

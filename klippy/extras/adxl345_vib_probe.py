@@ -15,7 +15,7 @@ TAP_SCALE = 0.0625 * adxl345.FREEFALL_ACCEL  # 62.5mg/LSB * Earth gravity in mm/
 ADXL345_REST_TIME = .1
 
 
-class ADXL345VibrationProbe:
+class ADXL345VibProbe:
     def __init__(self, config):
         self.printer = config.get_printer()
         gcode_macro = self.printer.load_object(config, 'gcode_macro')
@@ -163,4 +163,4 @@ class ADXL345VibrationProbe:
 
 
 def load_config(config):
-    return ADXL345VibrationProbe(config)
+    return ADXL345VibProbe(config)

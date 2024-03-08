@@ -5,6 +5,8 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging, math
 
+import toolhead
+
 HOMING_START_DELAY = 0.001
 ENDSTOP_SAMPLE_TIME = .000015
 ENDSTOP_SAMPLE_COUNT = 4
@@ -43,10 +45,10 @@ class HomingMove:
             toolhead = printer.lookup_object('toolhead')
         self.toolhead = toolhead
         self.stepper_positions = []
+        self._moves = None
     def get_mcu_endstops(self):
         return [es for es, name in self.endstops]
-    def _calc_endstop_rate(self, mcu_endstop, movepos, speed):
-        startpos = self.toolhead.get_position()
+    def _calc_endstop_rate(self, mcu_endstop, startpos, movepos, speed):
         axes_d = [mp - sp for mp, sp in zip(movepos, startpos)]
         move_d = math.sqrt(sum([d*d for d in axes_d[:3]]))
         move_t = move_d / speed
@@ -65,10 +67,14 @@ class HomingMove:
             kin_spos[sname] += offsets.get(sname, 0) * stepper.get_step_dist()
         thpos = self.toolhead.get_position()
         return list(kin.calc_position(kin_spos))[:3] + thpos[3:]
+    def set_homing_moves(self, moves):
+        if self._moves is not None:
+            raise self.printer.command_error("Multiple requested homing moves not supported")
+        self._moves = moves
     def homing_move(self, movepos, speed, probe_pos=False,
                     triggered=True, check_triggered=True):
         # Notify start of homing/probing move
-        self.printer.send_event("homing:homing_move_begin", self)
+        self.printer.send_event("homing:homing_move_begin", self, movepos, speed)
         # Note start location
         self.toolhead.flush_step_generation()
         kin = self.toolhead.get_kinematics()
@@ -81,7 +87,15 @@ class HomingMove:
         print_time = self.toolhead.get_last_move_time()
         endstop_triggers = []
         for mcu_endstop, name in self.endstops:
-            rest_time = self._calc_endstop_rate(mcu_endstop, movepos, speed)
+            startpos = self.toolhead.get_position()
+            rest_time = 0
+            if self._moves is None:
+                moves = [(movepos, speed)]
+            else:
+                moves = self._moves
+            for movepos, speed in moves:
+                rest_time = max(rest_time, self._calc_endstop_rate(mcu_endstop, startpos, movepos, speed))
+                startpos = movepos
             wait = mcu_endstop.home_start(print_time, ENDSTOP_SAMPLE_TIME,
                                           ENDSTOP_SAMPLE_COUNT, rest_time,
                                           triggered=triggered)
@@ -91,7 +105,7 @@ class HomingMove:
         # Issue move
         error = None
         try:
-            self.toolhead.drip_move(movepos, speed, all_endstop_trigger)
+            self.toolhead.drip_moves(moves, all_endstop_trigger)
         except self.printer.command_error as e:
             error = "Error during homing move: %s" % (str(e),)
         # Wait for endstops to trigger
@@ -119,11 +133,12 @@ class HomingMove:
             if trig_steps != halt_steps:
                 haltpos = self.calc_toolhead_pos(kin_spos, halt_steps)
         else:
-            haltpos = trigpos = movepos
+            last_movepos, _ = moves[-1]
+            haltpos = trigpos = last_movepos
             over_steps = {sp.stepper_name: sp.halt_pos - sp.trig_pos
                           for sp in self.stepper_positions}
             if any(over_steps.values()):
-                self.toolhead.set_position(movepos)
+                self.toolhead.set_position(last_movepos)
                 halt_kin_spos = {s.get_name(): s.get_commanded_position()
                                  for s in kin.get_steppers()}
                 haltpos = self.calc_toolhead_pos(halt_kin_spos, over_steps)

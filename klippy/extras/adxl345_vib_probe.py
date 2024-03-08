@@ -105,7 +105,6 @@ class ADXL345VibProbe:
         move_t = accel_t * 2 + cruise_t
         moves = []
 
-        t = 0
         t_seg = .25 / freq
         max_v = self.accel * t_seg
         L = .5 * self.accel * t_seg**2
@@ -113,8 +112,14 @@ class ADXL345VibProbe:
         vx, vy, vz = self.axis.get_point(max_v)
 
         def z_speed_at_time(t):
-            return axis_r * (self.accel * min(t, accel_t) + speed * max(0, t - accel_t) - self.accel * max(0, t - accel_t - cruise_t))
+          if t < accel_t:
+            return axis_r * self.accel * t
+          elif t < accel_t + cruise_t:
+            return axis_r * speed
+          else:
+            return axis_r * (speed - self.accel * (t - accel_t - cruise_t))
 
+        t = 0
         while t < move_t:
             nX = X + sign * dX
             nY = Y + sign * dY

@@ -53,7 +53,7 @@ class HomingHeaters:
             heater = self.pheaters.lookup_heater(heater_name)
             self.target_save[heater_name] = heater.get_temp(0)[1]
             heater.set_temp(0.)
-    def handle_homing_move_end(self, hmove, *_):
+    def handle_homing_move_end(self, hmove):
         if not self.check_eligible(hmove.get_mcu_endstops()):
             return
         for heater_name in self.disable_heaters:

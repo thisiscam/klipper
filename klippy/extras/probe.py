@@ -74,12 +74,12 @@ class PrinterProbe:
         self.gcode.register_command('Z_OFFSET_APPLY_PROBE',
                                     self.cmd_Z_OFFSET_APPLY_PROBE,
                                     desc=self.cmd_Z_OFFSET_APPLY_PROBE_help)
-    def _handle_homing_move_begin(self, *params):
+    def _handle_homing_move_begin(self, hmove, movepos, speed):
         if self.mcu_probe in hmove.get_mcu_endstops():
-            self.mcu_probe.probe_prepare(*params)
-    def _handle_homing_move_end(self, *params):
+            self.mcu_probe.probe_prepare(hmove, movepos, speed)
+    def _handle_homing_move_end(self, hmove, movepos, speed):
         if self.mcu_probe in hmove.get_mcu_endstops():
-            self.mcu_probe.probe_finish(*params)
+            self.mcu_probe.probe_finish(hmove, movepos, speed)
     def _handle_home_rails_begin(self, homing_state, rails):
         endstops = [es for rail in rails for es, name in rail.get_endstops()]
         if self.mcu_probe in endstops:

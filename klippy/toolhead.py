@@ -506,7 +506,7 @@ class ToolHead:
             self.note_mcu_movequeue_activity(npt + self.kin_flush_delay,
                                              set_step_gen_time=True)
             self._advance_move_time(npt)
-    def drip_move(self, newpos, speed, drip_completion):
+    def drip_moves(self, moves, drip_completion):
         self.dwell(self.kin_flush_delay)
         # Transition from "NeedPrime"/"Priming"/main state to "Drip" state
         self.lookahead.flush()
@@ -519,7 +519,8 @@ class ToolHead:
         self.drip_completion = drip_completion
         # Submit move
         try:
-            self.move(newpos, speed)
+            for newpos, speed in moves:
+                self.move(newpos, speed)
         except self.printer.command_error as e:
             self.reactor.update_timer(self.flush_timer, self.reactor.NOW)
             self.flush_step_generation()
@@ -533,6 +534,8 @@ class ToolHead:
         # Exit "Drip" state
         self.reactor.update_timer(self.flush_timer, self.reactor.NOW)
         self.flush_step_generation()
+    def drip_move(self, newpos, speed, drip_completion):
+        return self.drip_moves([(newpos, speed)], drip_completion)
     # Misc commands
     def stats(self, eventtime):
         max_queue_time = max(self.print_time, self.last_flush_time)

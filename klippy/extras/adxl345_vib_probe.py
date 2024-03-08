@@ -101,7 +101,7 @@ class ADXL345VibProbe:
 
         toolhead.cmd_M204(self.gcode.create_gcode_command("M204", "M204", {"S": self.accel}))
 
-        axis_r, accel_t, cruise_t, speed = force_move.calc_move_time(movepos, speed, self.accel)
+        axis_r, accel_t, cruise_t, speed = force_move.calc_move_time(movepos[2] - Z, speed, self.accel)
         move_t = accel_t * 2 + cruise_t
         moves = []
 

@@ -22,8 +22,8 @@ class ADXL345VibProbe:
         self.activate_gcode = gcode_macro.load_template(config, 'activate_gcode', '')
         self.deactivate_gcode = gcode_macro.load_template(config, 'deactivate_gcode', '')
         probe_pin = config.get('probe_pin')
-        self.freq = config.getint('freq', 50, above=10, maxval=1000.)
-        self.accel = config.getint('accel', 500, above=10, maxval=10000.)
+        self.freq = config.getint('freq', 50, minval=10, maxval=1000.)
+        self.accel = config.getfloat('accel', 500, above=10, maxval=10000.)
         self.position_endstop = config.getfloat('z_offset')
         try:
           self.axis = resonance_tester.parse_axis(config.get("axis", "X").lower())

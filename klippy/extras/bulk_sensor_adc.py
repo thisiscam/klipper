@@ -17,6 +17,10 @@ class BulkSensorAdc(object):
     # detect if a data value is saturated
     def get_range(self):
         return -1, 1
+    def setup_sensor(self):
+        pass
+    def cleanup_sensor(self):
+        pass
     # subscribe to data being published from the sensor
     # callback is called with a list containing (time, counts) tuples:
     # [(time, counts), (time, counts), ...]

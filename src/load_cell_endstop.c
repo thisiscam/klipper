@@ -37,12 +37,13 @@ enum {FLAG_IS_HOMING = 1 << 0
     , FLAG_IS_TRIGGERED = 1 << 1
     , FLAG_IS_HOMING_TRIGGER = 1 << 2
     , FLAG_IS_FILTER_READY = 1 << 3
+    , FLAG_IS_HOMING_PRIMING = 1 << 4
     };
 
 // Endstop Structure
 struct load_cell_endstop {
     struct timer time;
-    uint32_t trigger_ticks, last_sample_ticks, rest_ticks;
+    uint32_t trigger_ticks, last_sample_ticks, rest_ticks, delay_ticks;
     struct trsync *ts;
     int32_t last_sample, safety_counts_min, safety_counts_max
             , filter_counts_min, filter_counts_max
@@ -53,6 +54,7 @@ struct load_cell_endstop {
     // filter composed of second order sections
     fixedQ12_t filter[MAX_SECTIONS][SECTION_WIDTH];     // aka sos
     fixedQ12_t filter_state[MAX_SECTIONS][STATE_WIDTH]; // aka zi
+    fixedQ12_t moving_avg;
 };
 
 // Multiply two fixedQ12_t numbers into fixedQ12_t
@@ -88,6 +90,9 @@ counts_to_grams(struct load_cell_endstop *lce, const int32_t counts) {
  *  Second Order Sections Filter Implementaiton
  */
 // filter Q12 grams input value, return Q12 grams filtered
+#define fixedQ12_9div10 ((fixedQ12_t)((1 << (FIXEDQ12_FRAC_BITS )) * 0.9))
+#define fixedQ12_1div10 ((fixedQ12_t)((1 << (FIXEDQ12_FRAC_BITS)) * 0.1))
+
 fixedQ12_t
 sosfilt(struct load_cell_endstop *lce, const fixedQ12_t grams_in) {
     fixedQ12_t cur_val = grams_in;
@@ -103,7 +108,8 @@ sosfilt(struct load_cell_endstop *lce, const fixedQ12_t grams_in) {
             - fixedQ12_mul((lce->filter[section][4]), next_val);
         cur_val = next_val;
     }
-    return cur_val;
+    lce->moving_avg = fixedQ12_mul(lce->moving_avg, fixedQ12_9div10) + fixedQ12_mul(fixedQ12_abs(cur_val), fixedQ12_1div10);
+    return lce->moving_avg;
 }
 
 // resets the filter state (zi) to 0 to start a new homing event
@@ -114,6 +120,7 @@ reset_filter_state(struct load_cell_endstop *lce) {
         lce->filter_state[i][0] = 0;
         lce->filter_state[i][1] = 0;
     }
+    lce->moving_avg = 0;
 }
 
 static inline uint8_t
@@ -164,12 +171,19 @@ void
 load_cell_endstop_report_sample(struct load_cell_endstop *lce
                                 , const int32_t sample, const uint32_t ticks)
 {
+    uint32_t elapsed_ticks = ticks - lce->last_sample_ticks;
     // save new sample
     lce->last_sample = sample;
     lce->last_sample_ticks = ticks;
     lce->watchdog_count = 0;
     const uint8_t is_homing = is_flag_set(FLAG_IS_HOMING, lce);
-
+    const uint8_t is_priming = is_flag_set(FLAG_IS_HOMING_PRIMING, lce);
+    if(lce->delay_ticks < elapsed_ticks) {
+        clear_flag(FLAG_IS_HOMING_PRIMING, lce);
+        lce->delay_ticks = 0;
+    } else {
+        lce->delay_ticks -= elapsed_ticks;
+    }
     // check for safety limit violations first
     const uint8_t is_safety_trigger = sample <= lce->safety_counts_min
                                         || sample >= lce->safety_counts_max;
@@ -188,18 +202,20 @@ load_cell_endstop_report_sample(struct load_cell_endstop *lce
         }
         const fixedQ12_t grams = counts_to_grams(lce, sample);
         const fixedQ12_t filtered_grams = sosfilt(lce, grams);
-        const fixedQ12_t abs_grams = fixedQ12_abs(filtered_grams);
-        is_trigger = abs_grams >= lce->trigger_grams;
-        /*// DEBUG: uncomment to log filter trigger in grams
+        // const fixedQ12_t abs_grams = fixedQ12_abs(filtered_grams);
+        // output("gram = %i, abs = %i, trigger = %i", (grams >> FIXEDQ12_FRAC_BITS), (uint32_t)(filtered_grams >> FIXEDQ12_FRAC_BITS), lce->trigger_grams);
+        is_trigger = filtered_grams <= lce->trigger_grams;
+        // DEBUG: uncomment to log filter trigger in grams
         if (is_trigger) {
             output("Filter Trigger at %i grams"
-                    , (uint32_t)(abs_grams >> FIXEDQ12_FRAC_BITS));
-        }*/
+                    , (uint32_t)(filtered_grams >> FIXEDQ12_FRAC_BITS));
+        }
     } else {
         // static threashold triggering for QUERY_ENDSTOPS and non-filter use
         is_trigger = sample <= lce->trigger_counts_min
                         || sample >= lce->trigger_counts_max;
     }
+    is_trigger &= !is_priming;
 
     const uint8_t is_homing_triggered = is_flag_set(FLAG_IS_HOMING_TRIGGER,
                                                 lce);
@@ -229,6 +245,8 @@ load_cell_endstop_report_sample(struct load_cell_endstop *lce
             lce->trigger_ticks = 0;
         }
     }
+
+
 }
 
 // Timer callback that monitors for timeouts
@@ -348,12 +366,12 @@ command_config_filter_section(uint32_t *args)
         lce->filter[section_idx][i] = args[i + arg_base];
     }
 
-    /*
+    
     // DEBUG: uncomment to log filter section contents
-    for (uint8_t i = 0; i < SECTION_WIDTH; i++) {
-        output("section[%c][%c]=%i", section_idx, i,
-                                    (int32_t)lce->sos[section_idx][i]);
-    }*/
+    // for (uint8_t i = 0; i < SECTION_WIDTH; i++) {
+    //     output("section[%c][%c]=%i", section_idx, i,
+    //                                 (int32_t)lce->sos[section_idx][i]);
+    // }
 
     // update counter & check for last section
     lce->last_section += 1;
@@ -402,14 +420,16 @@ command_load_cell_endstop_home(uint32_t *args)
     lce->rest_ticks = args[5];
     lce->watchdog_max = args[6];
     lce->watchdog_count = 0;
+    lce->delay_ticks = args[7];
     reset_filter_state(lce);
     lce->time.func = watchdog_event;
     sched_add_timer(&lce->time);
     set_flag(FLAG_IS_HOMING, lce);
+    set_flag(FLAG_IS_HOMING_PRIMING, lce);
 }
 DECL_COMMAND(command_load_cell_endstop_home,
              "load_cell_endstop_home oid=%c trsync_oid=%c trigger_reason=%c"
-             " clock=%u sample_count=%c rest_ticks=%u timeout=%u");
+             " clock=%u sample_count=%c rest_ticks=%u timeout=%u delay_ticks=%u");
 
 void
 command_load_cell_endstop_query_state(uint32_t *args)

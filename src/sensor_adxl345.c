@@ -48,7 +48,7 @@ command_config_adxl345(uint32_t *args)
     ax->timer.func = adxl345_event;
     ax->spi = spidev_oid_lookup(args[1]);
     if (args[2] != 0) {
-        ax->vae = load_cell_endstop_lookup(args[2]);
+        ax->vae = load_cell_endstop_oid_lookup(args[2]);
         ax->ve_axis = args[3];
     }
 }
@@ -75,7 +75,7 @@ adxl_reschedule_timer(struct adxl345 *ax)
 #define BYTES_PER_SAMPLE 5
 
 static inline
-int32_t sensor_13bits_reading_to_int32(uint8_t upper, uint8_t lower)
+int32_t sensor_13bits_reading_to_int32(uint8_t high, uint8_t low)
 {
     // Combine the two parts into a 13-bit number
     int32_t num = ((high & 0x1F) << 8) | (low & 0xFF);

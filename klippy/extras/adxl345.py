@@ -4,7 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging, time, collections, multiprocessing, os
-from . import bus, bulk_sensor
+from . import bus, bulk_sensor, bulk_sensor_adc
 
 # ADXL345 registers
 REG_DEVID = 0x00
@@ -190,7 +190,7 @@ SAMPLES_PER_BLOCK = bulk_sensor.MAX_BULK_MSG_SIZE // BYTES_PER_SAMPLE
 BATCH_UPDATES = 0.100
 
 # Printer class that controls ADXL345 chip
-class ADXL345(BulkSensorAdc, LoadCellEndstopSensor):
+class ADXL345(bulk_sensor_adc.BulkSensorAdc, bulk_sensor_adc.LoadCellEndstopSensor):
     def __init__(self, config, allocate_endstop_oid=False):
         self.printer = config.get_printer()
         AccelCommandHelper(config, self)
@@ -198,7 +198,7 @@ class ADXL345(BulkSensorAdc, LoadCellEndstopSensor):
         self.data_rate = config.getint('rate', 3200)
         try:
             vibration_endstop_axis = config.get('vibration_endstop_axis', 'x')
-            vibration_endstop_axis = 'xyz'.index(vibration_endstop_axis)
+            self.vibration_endstop_axis = 'xyz'.index(vibration_endstop_axis)
         except IndexError:
             raise config.error("Invalid vibration_endstop_axis parameter '%s'" % (vibration_endstop_axis,))
         if self.data_rate not in QUERY_RATES:
@@ -206,17 +206,13 @@ class ADXL345(BulkSensorAdc, LoadCellEndstopSensor):
         # Setup mcu sensor_adxl345 bulk query code
         self.spi = bus.MCU_SPI_from_config(config, 3, default_speed=5000000)
         self.mcu = mcu = self.spi.get_mcu()
-        self.oid = oid = mcu.create_oid()
+        self.oid = mcu.create_oid()
         self.lce_oid = 0
         if allocate_endstop_oid:
             self.lce_oid = self.mcu.create_oid()
         self.query_adxl345_cmd = None
-        mcu.add_config_cmd("config_adxl345 oid=%d spi_oid=%d load_cell_endstop_oid=%d"
-                           % (oid, self.spi.get_oid(), vibration_endstop_axis))
-        mcu.add_config_cmd("query_adxl345 oid=%d rest_ticks=0"
-                           % (oid,), on_restart=True)
         mcu.register_config_callback(self._build_config)
-        self.bulk_queue = bulk_sensor.BulkDataQueue(mcu, oid=oid)
+        self.bulk_queue = bulk_sensor.BulkDataQueue(mcu, oid=self.oid)
         # Clock tracking
         chip_smooth = self.data_rate * BATCH_UPDATES * 2
         self.clock_sync = bulk_sensor.ClockSyncRegression(mcu, chip_smooth)
@@ -233,6 +229,10 @@ class ADXL345(BulkSensorAdc, LoadCellEndstopSensor):
                                          self.name, {'header': hdr})
     def _build_config(self):
         cmdqueue = self.spi.get_command_queue()
+        self.mcu.add_config_cmd("config_adxl345 oid=%d spi_oid=%d load_cell_endstop_oid=%d vibration_endstop_axis=%d"
+                           % (self.oid, self.spi.get_oid(), self.lce_oid, self.vibration_endstop_axis))
+        self.mcu.add_config_cmd("query_adxl345 oid=%d rest_ticks=0"
+                           % (self.oid,), on_restart=True)
         self.query_adxl345_cmd = self.mcu.lookup_command(
             "query_adxl345 oid=%c rest_ticks=%u", cq=cmdqueue)
         self.clock_updater.setup_query_command(
@@ -253,7 +253,7 @@ class ADXL345(BulkSensorAdc, LoadCellEndstopSensor):
     def get_mcu(self):
         return self.mcu
     def get_samples_per_second(self):
-        return 3200
+        return self.data_rate
     # returns a tuple of the minimum and maximum value of the sensor, used to
     # detect if a data value is saturated
     def get_range(self):
@@ -298,13 +298,13 @@ class ADXL345(BulkSensorAdc, LoadCellEndstopSensor):
                 y = round(raw_xyz[y_pos] * y_scale, 6)
                 z = round(raw_xyz[z_pos] * z_scale, 6)
                 ptime = round(time_base + (msg_cdiff + i) * inv_freq, 6)
+                # samples[count] = (ptime, x, y, z)
                 samples[count] = (ptime, x, y, z)
                 count += 1
         self.clock_sync.set_last_chip_clock(seq * SAMPLES_PER_BLOCK + i)
         del samples[count:]
         return samples
-    # Start, stop, and process message batches
-    def _start_measurements(self):
+    def setup_sensor(self):
         # In case of miswiring, testing ADXL345 device ID prevents treating
         # noise or wrong signal as a correctly initialized device
         dev_id = self.read_reg(REG_DEVID)
@@ -320,18 +320,23 @@ class ADXL345(BulkSensorAdc, LoadCellEndstopSensor):
         self.set_reg(REG_FIFO_CTL, 0x00)
         self.set_reg(REG_BW_RATE, QUERY_RATES[self.data_rate])
         self.set_reg(REG_FIFO_CTL, SET_FIFO_CTL)
+        self.set_reg(REG_POWER_CTL, 0x08)
+    def cleanup_sensor(self):
+        self.set_reg(REG_POWER_CTL, 0x00)
+    # Start, stop, and process message batches
+    def _start_measurements(self):
+        self.setup_sensor()
         # Start bulk reading
         self.bulk_queue.clear_samples()
         rest_ticks = self.mcu.seconds_to_clock(4. / self.data_rate)
         self.query_adxl345_cmd.send([self.oid, rest_ticks])
-        self.set_reg(REG_POWER_CTL, 0x08)
         logging.info("ADXL345 starting '%s' measurements", self.name)
         # Initialize clock tracking
         self.clock_updater.note_start()
         self.last_error_count = 0
     def _finish_measurements(self):
         # Halt bulk reading
-        self.set_reg(REG_POWER_CTL, 0x00)
+        self.cleanup_sensor()
         self.query_adxl345_cmd.send_wait_ack([self.oid, 0])
         self.bulk_queue.clear_samples()
         logging.info("ADXL345 finished '%s' measurements", self.name)

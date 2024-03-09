@@ -4,7 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import collections, logging
-from . import hx71xm, adxl345
+from . import hx71x, adxl345
 from .bulk_sensor import BatchWebhooksClient
 
 class SaturationException(Exception):
@@ -297,6 +297,7 @@ class LoadCellSampleCollector:
             self.is_started = False
         return self.is_started
     def _finish_collecting(self):
+        self._load_cell.get_sensor().cleanup_sensor()
         self.is_started = False
         self.min_time = 0.
         self.max_time = float("inf")
@@ -319,6 +320,7 @@ class LoadCellSampleCollector:
             return
         self.min_time = min_time if min_time is not None else self.min_time
         self.is_started = True
+        self._load_cell.get_sensor().setup_sensor()
         self._load_cell.add_client(self._on_samples)
     # stop collecting immediately and return results
     def stop_collecting(self):

@@ -16,12 +16,8 @@ class AccelerometerVibrationProbe(load_cell_probe.LoadCellEndstop):
           raise config.error(str(e))
 
         self._old_max_accel = self._old_max_accel_to_decel = None
-
-    def handle_mcu_identify(self):
-        kin = self.printer.lookup_object('toolhead').get_kinematics()
-        for stepper in kin.get_steppers():
-            if stepper.is_active_axis('z'):
-                self.add_stepper(stepper)
+        
+        self._rest_time = 4. / float(self._sensor.get_samples_per_second())
 
     def deactivate_probe(self):
         toolhead = self._printer.lookup_object('toolhead')
@@ -49,7 +45,7 @@ class AccelerometerVibrationProbe(load_cell_probe.LoadCellEndstop):
 
     def probe_prepare(self, hmove, movepos, speed):
         self.activate_gcode.run_gcode_from_command()
-        toolhead = self.printer.lookup_object('toolhead')
+        toolhead = self._printer.lookup_object('toolhead')
         toolhead.flush_step_generation()
         toolhead.dwell(REST_TIME)
         print_time = toolhead.get_last_move_time()
@@ -59,7 +55,7 @@ class AccelerometerVibrationProbe(load_cell_probe.LoadCellEndstop):
         freq = self.freq
         # Override maximum acceleration and acceleration to
         # deceleration based on the maximum test frequency
-        systime = self.printer.get_reactor().monotonic()
+        systime = self._printer.get_reactor().monotonic()
         toolhead_info = toolhead.get_status(systime)
         self._old_max_accel = toolhead_info['max_accel']
         self._old_max_accel_to_decel = toolhead_info['max_accel_to_decel']
@@ -67,13 +63,15 @@ class AccelerometerVibrationProbe(load_cell_probe.LoadCellEndstop):
         self.gcode.run_script_from_command(
                 "SET_VELOCITY_LIMIT ACCEL=%.3f ACCEL_TO_DECEL=%.3f" % (
                     max_accel, max_accel))
-        input_shaper = self.printer.lookup_object('input_shaper', None)
+        input_shaper = self._printer.lookup_object('input_shaper', None)
         if input_shaper is not None:
             input_shaper.disable_shaping()
 
         toolhead.cmd_M204(self.gcode.create_gcode_command("M204", "M204", {"S": self.accel}))
-
-        axis_r, accel_t, cruise_t, speed = force_move.calc_move_time(movepos[2] - Z, speed, self.accel)
+        
+        z_target = movepos[2]
+        z_accel = 500
+        axis_r, accel_t, cruise_t, speed = force_move.calc_move_time(z_target - Z, speed, z_accel)
         move_t = accel_t * 2 + cruise_t
         moves = []
 
@@ -85,25 +83,27 @@ class AccelerometerVibrationProbe(load_cell_probe.LoadCellEndstop):
 
         def z_speed_at_time(t):
           if t < accel_t:
-            return axis_r * self.accel * t
+            return axis_r * z_accel * t
           elif t < accel_t + cruise_t:
             return axis_r * speed
           else:
-            return axis_r * (speed - self.accel * (t - accel_t - cruise_t))
-
+            return axis_r * (speed - z_accel * (t - accel_t - cruise_t))
+        
+        # z_seg = (z_target - Z) / (move_t / t_seg)
         t = 0
-        while t < move_t:
+        while t < move_t - t_seg:
             nX = X + sign * dX
             nY = Y + sign * dY
             z_move_velocity = z_speed_at_time(t)
             max_v = vx **2 + vy **2 + (vz + z_move_velocity)**2
             Z += z_move_velocity * t_seg
-            nZ = Z + sign * dZ
+            nZ = max(z_target, Z + sign * dZ)
             moves.append(([nX, nY, nZ, E], max_v))
-            t += t_seg / 2
+            t += t_seg
             z_move_velocity = z_speed_at_time(t)
             max_v = vx **2 + vy **2 + (vz + z_move_velocity)**2
             Z += z_move_velocity * t_seg
+            Z = max(z_target, Z)
             moves.append(([X, Y, Z, E], max_v))
             t += t_seg
             sign = -sign
@@ -111,47 +111,38 @@ class AccelerometerVibrationProbe(load_cell_probe.LoadCellEndstop):
         hmove.set_homing_moves(moves)
 
     def probe_finish(self, hmove):
-        chip = self.adxl345
-        toolhead = self.printer.lookup_object('toolhead')
+        toolhead = self._printer.lookup_object('toolhead')
         toolhead.dwell(REST_TIME)
         print_time = toolhead.get_last_move_time()
-        clock = chip.mcu.print_time_to_clock(print_time)
+        clock = self._mcu.print_time_to_clock(print_time)
 
         # Restore the original acceleration values
         self.gcode.run_script_from_command(
                 "SET_VELOCITY_LIMIT ACCEL=%.3f ACCEL_TO_DECEL=%.3f" % (
                     self._old_max_accel, self._old_max_accel_to_decel))
         # Restore input shaper if it was disabled for resonance testing
-        input_shaper = self.printer.lookup_object('input_shaper', None)
+        input_shaper = self._printer.lookup_object('input_shaper', None)
         if input_shaper is not None:
             input_shaper.enable_shaping()
         self.deactivate_gcode.run_gcode_from_command()
 
-    cmd_SET_ACCEL_PROBE_help = "Configure ADXL345 parameters related to probing"
-
-    def cmd_SET_ACCEL_PROBE(self, gcmd):
-        chip = self.adxl345
-        self.tap_thresh = gcmd.get_float('TAP_THRESH', self.tap_thresh,
-                                         minval=TAP_SCALE, maxval=100000.)
-        self.tap_dur = gcmd.get_float('TAP_DUR', self.tap_dur,
-                                      above=DUR_SCALE, maxval=0.1)
-        chip.set_reg(REG_THRESH_TAP, int(self.tap_thresh / TAP_SCALE))
-        chip.set_reg(REG_DUR, int(self.tap_dur / DUR_SCALE))
 
 
 def load_config(config):
     # Sensor types supported by load_cell_probe
-    sensors = {}
-    sensors['adx345_vibration'] = adxl345.ADXL345
-    sensor_class = config.getchoice('sensor_type', sensors)
-    sensor = sensor_class(config, allocate_endstop_oid=True)
-    lc = load_cell.LoadCell(config, sensor)
     printer = config.get_printer()
+    sensors = {}
+    sensors['adxl345'] = adxl345.ADXL345
+    sensor_class = config.getchoice('sensor_type', sensors)
+    sensor_name = config.get('sensor_type')
+    sensor = sensor_class(config, allocate_endstop_oid=True)
+    printer.add_object(sensor_name, sensor)
+    lc = load_cell.LoadCell(config, sensor)
     name = config.get_name().split()[-1]
     lc_name = 'accelerometer_vibration' if name == "accelerometer_vibration_probe" else 'accelerometer_vibration ' + name
     printer.add_object(lc_name, lc)
     lce = AccelerometerVibrationProbe(config, lc)
-    lc_probe = load_cell.LoadCellPrinterProbe(config, lc, lce)
+    lc_probe = load_cell_probe.LoadCellPrinterProbe(config, lc, lce)
     #TODO: for multiple probes this cant be static value 'probe'
     printer.add_object('probe', lc_probe)
     return lc_probe

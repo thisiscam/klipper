@@ -196,6 +196,11 @@ class ADXL345:
         AccelCommandHelper(config, self)
         self.axes_map = read_axes_map(config)
         self.data_rate = config.getint('rate', 3200)
+        try:
+            vibration_endstop_axis = config.get('vibration_endstop_axis', 'x')
+            vibration_endstop_axis = 'xyz'.index(vibration_endstop_axis)
+        except IndexError:
+            raise config.error("Invalid vibration_endstop_axis parameter '%s'" % (vibration_endstop_axis,))
         if self.data_rate not in QUERY_RATES:
             raise config.error("Invalid rate parameter: %d" % (self.data_rate,))
         # Setup mcu sensor_adxl345 bulk query code
@@ -203,8 +208,8 @@ class ADXL345:
         self.mcu = mcu = self.spi.get_mcu()
         self.oid = oid = mcu.create_oid()
         self.query_adxl345_cmd = None
-        mcu.add_config_cmd("config_adxl345 oid=%d spi_oid=%d"
-                           % (oid, self.spi.get_oid()))
+        mcu.add_config_cmd("config_adxl345 oid=%d spi_oid=%d vibration_endstop_axis=%d"
+                           % (oid, self.spi.get_oid(), vibration_endstop_axis))
         mcu.add_config_cmd("query_adxl345 oid=%d rest_ticks=0"
                            % (oid,), on_restart=True)
         mcu.register_config_callback(self._build_config)

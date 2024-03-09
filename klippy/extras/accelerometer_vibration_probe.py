@@ -1,27 +1,12 @@
-"""An accelerometer-based vibration based probe."""
+"""An accelerometer-vibration based probe."""
 
-from . import probe, adxl345, force_move, resonance_tester
+from . import probe, adxl345, force_move, resonance_tester, load_cell, load_cell_probe
 
-REG_THRESH_TAP = 0x1D
-REG_DUR = 0x21
-REG_INT_MAP = 0x2F
-REG_TAP_AXES = 0x2A
-REG_INT_ENABLE = 0x2E
-REG_INT_SOURCE = 0x30
+REST_TIME = .1
 
-DUR_SCALE = 0.000625  # 0.625 msec / LSB
-TAP_SCALE = 0.0625 * adxl345.FREEFALL_ACCEL  # 62.5mg/LSB * Earth gravity in mm/s**2
-
-ADXL345_REST_TIME = .1
-
-
-class ADXL345VibProbe:
-    def __init__(self, config):
-        self.printer = config.get_printer()
-        gcode_macro = self.printer.load_object(config, 'gcode_macro')
-        self.activate_gcode = gcode_macro.load_template(config, 'activate_gcode', '')
-        self.deactivate_gcode = gcode_macro.load_template(config, 'deactivate_gcode', '')
-        probe_pin = config.get('probe_pin')
+class AccelerometerVibrationProbe(load_cell_probe.LoadCellEndstop):
+    def __init__(self, config, load_cell_inst):
+        super().__init__(config, load_cell_inst)
         self.freq = config.getint('freq', 50, minval=10, maxval=1000.)
         self.accel = config.getfloat('accel', 500, above=10, maxval=10000.)
         self.position_endstop = config.getfloat('z_offset')
@@ -32,54 +17,41 @@ class ADXL345VibProbe:
 
         self._old_max_accel = self._old_max_accel_to_decel = None
 
-        self.adxl345 = self.printer.lookup_object('adxl345')
-        self.next_cmd_time = self.action_end_time = 0.
-        # # Create an "endstop" object to handle the sensor pin
-        ppins = self.printer.lookup_object('pins')
-        pin_params = ppins.lookup_pin(probe_pin, can_invert=True,
-                                      can_pullup=True)
-        mcu = pin_params['chip']
-        self.mcu_endstop = mcu.setup_pin('endstop', pin_params)
-        # Add wrapper methods for endstops
-        self.get_mcu = self.mcu_endstop.get_mcu
-        self.add_stepper = self.mcu_endstop.add_stepper
-        self.get_steppers = self.mcu_endstop.get_steppers
-        self.home_start = self.mcu_endstop.home_start
-        self.home_wait = self.mcu_endstop.home_wait
-        self.query_endstop = self.mcu_endstop.query_endstop
-        # Register commands and callbacks
-        self.gcode = self.printer.lookup_object('gcode')
-        # self.gcode.register_mux_command("SET_ACCEL_PROBE", "CHIP", None, self.cmd_SET_ACCEL_PROBE, desc=self.cmd_SET_ACCEL_PROBE_help)
-        self.printer.register_event_handler('klippy:connect', self.init_adxl)
-        self.printer.register_event_handler('klippy:mcu_identify', self.handle_mcu_identify)
-        self.printer.add_object('probe', probe.PrinterProbe(config, self))
-
-    def init_adxl(self):
-        chip = self.adxl345
-        # chip.set_reg(adxl345.REG_POWER_CTL, 0x00)
-        # chip.set_reg(adxl345.REG_DATA_FORMAT, 0x0B)
-
     def handle_mcu_identify(self):
         kin = self.printer.lookup_object('toolhead').get_kinematics()
         for stepper in kin.get_steppers():
             if stepper.is_active_axis('z'):
                 self.add_stepper(stepper)
 
+    def deactivate_probe(self):
+        toolhead = self._printer.lookup_object('toolhead')
+        self.deactivate_gcode.run_gcode_from_command()
+    def activate_probe(self):
+        toolhead = self._printer.lookup_object('toolhead')
+        self.activate_gcode.run_gcode_from_command()
     def multi_probe_begin(self):
-        pass
-
+        if self.deactivate_on_each_sample:
+            return
+        self.multi = 'FIRST'
     def multi_probe_end(self):
-        pass
-
-    def get_position_endstop(self):
-        return self.position_endstop
+        if self.deactivate_on_each_sample:
+            return
+        self.deactivate_probe()
+        self.multi = 'OFF'
+    def probe_prepare(self, hmove):
+        if self.multi == 'OFF' or self.multi == 'FIRST':
+            self.activate_probe()
+            if self.multi == 'FIRST':
+                self.multi = 'ON'
+    def probe_finish(self, hmove):
+        if self.multi == 'OFF':
+            self.deactivate_probe()
 
     def probe_prepare(self, hmove, movepos, speed):
         self.activate_gcode.run_gcode_from_command()
-        chip = self.adxl345
         toolhead = self.printer.lookup_object('toolhead')
         toolhead.flush_step_generation()
-        toolhead.dwell(ADXL345_REST_TIME)
+        toolhead.dwell(REST_TIME)
         print_time = toolhead.get_last_move_time()
 
         X, Y, Z, E = toolhead.get_position()
@@ -141,7 +113,7 @@ class ADXL345VibProbe:
     def probe_finish(self, hmove):
         chip = self.adxl345
         toolhead = self.printer.lookup_object('toolhead')
-        toolhead.dwell(ADXL345_REST_TIME)
+        toolhead.dwell(REST_TIME)
         print_time = toolhead.get_last_move_time()
         clock = chip.mcu.print_time_to_clock(print_time)
 
@@ -168,4 +140,18 @@ class ADXL345VibProbe:
 
 
 def load_config(config):
-    return ADXL345VibProbe(config)
+    # Sensor types supported by load_cell_probe
+    sensors = {}
+    sensors['adx345_vibration'] = adxl345.ADXL345
+    sensor_class = config.getchoice('sensor_type', sensors)
+    sensor = sensor_class(config, allocate_endstop_oid=True)
+    lc = load_cell.LoadCell(config, sensor)
+    printer = config.get_printer()
+    name = config.get_name().split()[-1]
+    lc_name = 'accelerometer_vibration' if name == "accelerometer_vibration_probe" else 'accelerometer_vibration ' + name
+    printer.add_object(lc_name, lc)
+    lce = AccelerometerVibrationProbe(config, lc)
+    lc_probe = load_cell.LoadCellPrinterProbe(config, lc, lce)
+    #TODO: for multiple probes this cant be static value 'probe'
+    printer.add_object('probe', lc_probe)
+    return lc_probe

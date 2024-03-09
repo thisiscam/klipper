@@ -12,6 +12,7 @@
 #include "sched.h" // DECL_TASK
 #include "sensor_bulk.h" // sensor_bulk_report
 #include "spicmds.h" // spidev_transfer
+#include "load_cell_endstop.h"
 
 struct adxl345 {
     struct timer timer;
@@ -19,7 +20,7 @@ struct adxl345 {
     struct spidev_s *spi;
     uint8_t flags;
     struct sensor_bulk sb;
-    struct adc_endstop *vae; // optional vibration accelerometer endstop
+    struct load_cell_endstop *vae; // optional vibration accelerometer endstop
     uint8_t ve_axis; // axis for vibration endstop x=0, y=1, z=2
 };
 
@@ -47,11 +48,11 @@ command_config_adxl345(uint32_t *args)
     ax->timer.func = adxl345_event;
     ax->spi = spidev_oid_lookup(args[1]);
     if (args[2] != 0) {
-        ax->vae = adc_endstop_lookup(args[2]);
+        ax->vae = load_cell_endstop_lookup(args[2]);
         ax->ve_axis = args[3];
     }
 }
-DECL_COMMAND(command_config_adxl345, "config_adxl345 oid=%c spi_oid=%c adc_endstop_oid=%c vibration_endstop_axis=%c");
+DECL_COMMAND(command_config_adxl345, "config_adxl345 oid=%c spi_oid=%c load_cell_endstop_oid=%c vibration_endstop_axis=%c");
 
 // Helper code to reschedule the adxl345_event() timer
 static void
@@ -117,7 +118,7 @@ adxl_query(struct adxl345 *ax, uint8_t oid)
     if (ax->vae) {
         uint8_t sample_axis_idx = ax->ve_axis * 2 + 1;
         int32_t sample = sensor_13bits_reading_to_int32(msg[sample_axis_idx+1], msg[sample_axis_idx]);
-        adc_endstop_report_sample(ax->vae, sample, start_time);
+        load_cell_endstop_report_sample(ax->vae, sample, start_time);
     }
     // Check fifo status
     if (fifo_status >= 31)

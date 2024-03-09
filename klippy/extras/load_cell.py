@@ -4,7 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import collections, logging
-from . import hx71x
+from . import hx71xm, adxl345
 from .bulk_sensor import BatchWebhooksClient
 
 class SaturationException(Exception):
@@ -474,6 +474,7 @@ def load_config(config):
     # Sensor types
     sensors = {}
     sensors.update(hx71x.HX71X_SENSOR_TYPES)
+    sensors['adxl345_vibration'] = adxl345.ADXL345
     sensor_class = config.getchoice('sensor_type', sensors)
     return LoadCell(config, sensor_class(config))
 

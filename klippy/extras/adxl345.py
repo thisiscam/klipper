@@ -190,8 +190,8 @@ SAMPLES_PER_BLOCK = bulk_sensor.MAX_BULK_MSG_SIZE // BYTES_PER_SAMPLE
 BATCH_UPDATES = 0.100
 
 # Printer class that controls ADXL345 chip
-class ADXL345:
-    def __init__(self, config):
+class ADXL345(BulkSensorAdc, LoadCellEndstopSensor):
+    def __init__(self, config, allocate_endstop_oid=False):
         self.printer = config.get_printer()
         AccelCommandHelper(config, self)
         self.axes_map = read_axes_map(config)
@@ -207,8 +207,11 @@ class ADXL345:
         self.spi = bus.MCU_SPI_from_config(config, 3, default_speed=5000000)
         self.mcu = mcu = self.spi.get_mcu()
         self.oid = oid = mcu.create_oid()
+        self.lce_oid = 0
+        if allocate_endstop_oid:
+            self.lce_oid = self.mcu.create_oid()
         self.query_adxl345_cmd = None
-        mcu.add_config_cmd("config_adxl345 oid=%d spi_oid=%d vibration_endstop_axis=%d"
+        mcu.add_config_cmd("config_adxl345 oid=%d spi_oid=%d load_cell_endstop_oid=%d"
                            % (oid, self.spi.get_oid(), vibration_endstop_axis))
         mcu.add_config_cmd("query_adxl345 oid=%d rest_ticks=0"
                            % (oid,), on_restart=True)
@@ -247,6 +250,20 @@ class ADXL345:
                     "This is generally indicative of connection problems "
                     "(e.g. faulty wiring) or a faulty adxl345 chip." % (
                         reg, val, stored_val))
+    def get_mcu(self):
+        return self.mcu
+    def get_samples_per_second(self):
+        return 3200
+    # returns a tuple of the minimum and maximum value of the sensor, used to
+    # detect if a data value is saturated
+    def get_range(self):
+        range_max = 2 ** 12 
+        return -range_max, range_max
+    # add_Client interface, direct pass through to bulk_sensor API
+    def add_client(self, callback):
+        self.batch_bulk.add_client(callback)
+    def get_load_cell_endstop_oid(self):
+        return self.lce_oid
     def start_internal_client(self):
         aqh = AccelQueryHelper(self.printer)
         self.batch_bulk.add_client(aqh.handle_batch)

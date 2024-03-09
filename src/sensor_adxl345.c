@@ -12,6 +12,7 @@
 #include "sched.h" // DECL_TASK
 #include "sensor_bulk.h" // sensor_bulk_report
 #include "spicmds.h" // spidev_transfer
+#include "load_cell_endstop.h"
 
 struct adxl345 {
     struct timer timer;
@@ -19,6 +20,8 @@ struct adxl345 {
     struct spidev_s *spi;
     uint8_t flags;
     struct sensor_bulk sb;
+    struct load_cell_endstop *vae; // optional vibration accelerometer endstop
+    uint8_t ve_axis; // axis for vibration endstop x=0, y=1, z=2
 };
 
 enum {
@@ -44,8 +47,12 @@ command_config_adxl345(uint32_t *args)
                                    , sizeof(*ax));
     ax->timer.func = adxl345_event;
     ax->spi = spidev_oid_lookup(args[1]);
+    if (args[2] != 0) {
+        ax->vae = load_cell_endstop_lookup(args[2]);
+        ax->ve_axis = args[3];
+    }
 }
-DECL_COMMAND(command_config_adxl345, "config_adxl345 oid=%c spi_oid=%c");
+DECL_COMMAND(command_config_adxl345, "config_adxl345 oid=%c spi_oid=%c load_cell_endstop_oid=%c vibration_endstop_axis=%c");
 
 // Helper code to reschedule the adxl345_event() timer
 static void
@@ -67,12 +74,25 @@ adxl_reschedule_timer(struct adxl345 *ax)
 
 #define BYTES_PER_SAMPLE 5
 
+static inline
+int32_t sensor_13bits_reading_to_int32(uint8_t upper, uint8_t lower)
+{
+    // Combine the two parts into a 13-bit number
+    int32_t num = ((high & 0x1F) << 8) | (low & 0xFF);
+    // Sign extend from 13 to 32 bits if the original 13th bit is set (negative number)
+    if (num & 0x1000) { // Check if 13th bit is set
+        num |= 0xFFFFE000; // Extend the sign to 32 bits
+    }
+    return num;
+}
+
 // Query accelerometer data
 static void
 adxl_query(struct adxl345 *ax, uint8_t oid)
 {
     // Read data
     uint8_t msg[9] = { AR_DATAX0 | AM_READ | AM_MULTI, 0, 0, 0, 0, 0, 0, 0, 0 };
+    unsigned int start_time = timer_read_time();
     spidev_transfer(ax->spi, 1, sizeof(msg), msg);
     // Extract x, y, z measurements
     uint_fast8_t fifo_status = msg[8] & ~0x80; // Ignore trigger bit
@@ -95,6 +115,11 @@ adxl_query(struct adxl345 *ax, uint8_t oid)
     ax->sb.data_count += BYTES_PER_SAMPLE;
     if (ax->sb.data_count + BYTES_PER_SAMPLE > ARRAY_SIZE(ax->sb.data))
         sensor_bulk_report(&ax->sb, oid);
+    if (ax->vae) {
+        uint8_t sample_axis_idx = ax->ve_axis * 2 + 1;
+        int32_t sample = sensor_13bits_reading_to_int32(msg[sample_axis_idx+1], msg[sample_axis_idx]);
+        load_cell_endstop_report_sample(ax->vae, sample, start_time);
+    }
     // Check fifo status
     if (fifo_status >= 31)
         ax->sb.possible_overflows++;
